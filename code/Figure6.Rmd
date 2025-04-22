@@ -1,0 +1,524 @@
+---
+title: "EGR1 signature is associated with patient outcome in TCGA"
+author: "Tiangen Chang  tiangen.chang@nih.gov"
+output: 
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 2
+vignette: >
+  %\VignetteIndexEntry{GSE139324_HNSC}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      comment = FALSE, 
+                      warning = FALSE, 
+                      message = FALSE)
+require(ggplot2)
+ggplot2::theme_set(new = theme_bw(base_size = 12)) 
+```
+
+# load packages
+```{r, include=FALSE}
+library(dplyr)
+library(ggplot2)
+library(cowplot)
+library(patchwork)
+library(RColorBrewer)
+library(stringr)
+library(openxlsx)
+library(readxl)
+library(readr)
+library(gridExtra)
+library(survival)
+library(survminer)
+library(forestplot)
+library(GSVA)
+library(reshape2)
+library(tidyr)
+library(scales)
+
+```
+
+# Parameters and DEG Signatures
+```{r}
+pval_cutoff <- 0.05
+
+# Load DEGs: EGR1+ vs EGR1− (Clint scRNA-seq)
+EGR1_sig2_df <- read.csv(file = file.path(input_dir, "DEGs_EGR1p_vs_EGR1n.csv"))
+
+# Stratify DEG lists by log2FC thresholds
+EGR1_sig2_pos_5  <- EGR1_sig2_df$gene_symbol[EGR1_sig2_df$avg_log2FC > 0.5  & EGR1_sig2_df$p_val_adj < pval_cutoff]
+EGR1_sig2_pos_10 <- EGR1_sig2_df$gene_symbol[EGR1_sig2_df$avg_log2FC > 1    & EGR1_sig2_df$p_val_adj < pval_cutoff]
+EGR1_sig2_pos_20 <- EGR1_sig2_df$gene_symbol[EGR1_sig2_df$avg_log2FC > 2    & EGR1_sig2_df$p_val_adj < pval_cutoff]
+EGR1_sig2_pos_30 <- EGR1_sig2_df$gene_symbol[EGR1_sig2_df$avg_log2FC > 3    & EGR1_sig2_df$p_val_adj < pval_cutoff]
+
+EGR1_sig2_neg_5  <- EGR1_sig2_df$gene_symbol[EGR1_sig2_df$avg_log2FC < -0.5 & EGR1_sig2_df$p_val_adj < pval_cutoff]
+EGR1_sig2_neg_10 <- EGR1_sig2_df$gene_symbol[EGR1_sig2_df$avg_log2FC < -1   & EGR1_sig2_df$p_val_adj < pval_cutoff]
+EGR1_sig2_neg_20 <- EGR1_sig2_df$gene_symbol[EGR1_sig2_df$avg_log2FC < -2   & EGR1_sig2_df$p_val_adj < pval_cutoff]
+EGR1_sig2_neg_30 <- EGR1_sig2_df$gene_symbol[EGR1_sig2_df$avg_log2FC < -3   & EGR1_sig2_df$p_val_adj < pval_cutoff]
+
+hallmark_genes <- msigdbr(species = "Homo sapiens", category = "H")
+
+hypoxia_genes <- unique(hallmark_genes$gene_symbol[hallmark_genes$gs_name == "HALLMARK_HYPOXIA"])
+ANGIO_genes   <- unique(hallmark_genes$gene_symbol[hallmark_genes$gs_name == "HALLMARK_ANGIOGENESIS"])
+UPR_genes     <- unique(hallmark_genes$gene_symbol[hallmark_genes$gs_name == "HALLMARK_UNFOLDED_PROTEIN_RESPONSE"])
+
+T1_Ng <- c("SCIMP", "MRPL52", "BCL2A1B", "BCL2A1D", "BCL2A1A", "CCRL2", "CLEC4N", "GM19951", "EGR1", "LTC4S", "RPS28", "RPL22", "RPL36", "CDKN1A", "H3F3B", "GNGT2", "PPIA", "PTMA", "AA467197", "RPLP1", "RPS27L", "RPS8", "RPS19", "RPSA", "RPL32", "RPS21", "RPL36AL", "RPLP2", "SNRPG", "GM12840", "IL1R2", "DYNLL1", "SIGLECF", "PTGS2", "MIF", "RPS26", "RPL38", "HIST1H1C", "PIM1", "TOMM6", "HEXB", "JUN", "RPL19", "CST3", "RPS20", "RPS2", "FFAR2", "RPL18", "RPS15", "RPL35", "RPS29", "RPL14", "COX8A", "ATP5MPL", "RPS18", "NOP10", "COX7B", "RPL8", "CTSS", "COX7A2", "IER3", "RPL35A", "RPS17", "RPS5", "XBP1", "ATP5MD", "RPL15", "CLEC5A", "RPL26", "FOS", "COX6A1", "MTDH", "RPS15A", "YBX1", "JUNB", "CNBP", "GADD45B", "NME2", "RPLP0", "PTGS1", "RPL12", "ATOX1", "RPS3A1", "NDUFB1-PS", "HIST1H4I", "SNRPE", "HMGB1", "IL1B", "CHCHD2", "RGS10", "IGFBP6", "RPL10A", "RPL11", "TRMT112", "RPS25", "ZFP36", "SUMO2", "IL1A", "CSF1", "HINT1", "CD300C2", "BOLA2", "CREB5", "RPS13", "RPL5", "RPL6", "RPL36A", "ARPP19", "RPS11", "G0S2", "BHLHE40", "DAD1", "MICOS10", "GPR171", "RPL21", "RUNX1", "OST4", "BTF3", "SNRPB", "PFDN2", "PSME2", "POLR2L", "RPS3", "IER2", "H2-K1", "SERBP1", "HNRNPF", "NDUFA7", "RPL39", "RPL13", "SF3B5", "RAN", "MDH2", "MS4A6D", "TMEM14C", "TOMM7", "ATP5G1", "RPS7", "RBX1", "ATP5G2", "NACA", "RPL30", "RPL27A", "SRP9", "SOCS3", "COX5A", "RPS23", "CD74", "P2RY14", "IFI30", "SET", "RPS27", "GM31718", "REEP5", "UQCR11", "ST13", "COX17", "1810037I17RIK", "SNU13", "GSN", "NDUFA2", "COX6C", "CXCL2", "KRTCAP2", "ATP6V0C", "ATP5E", "TNFRSF13B", "SKIL", "TAF10", "EIF3J1", "RPL41", "RPL10", "EGR3", "RPS10", "GRCC10", "RPS16", "MRPS24", "PSMB10", "PARK7", "RPS12", "PGAM1", "ROMO1", "H1F0", "ELOB", "CCL3", "HSP90AB1", "OTULINL", "CMTM7", "COX6B1", "BTG2", "UQCRQ", "PNP", "HK2", "UBE2I", "UQCRB", "ANP32B", "RPL34", "IER3IP1", "TMEM59", "NINJ1", "EIF5B", "NME1", "GM10076", "RHOB", "MRPL42", "RPS24", "MRPS33", "RBM3", "GM20186", "ID1", "NEDD8", "POLR2F", "NDUFS7", "UQCC2", "EMC6", "NPM1", "RPS14", "ATP5J", "HIST1H2BC", "RHEB", "GNG10", "PSMB8", "EEF1D", "DPM3", "RWDD1", "SRP14", "RPL23", "UBA52", "EGLN3", "MT1", "LEPROTL1", "CKS2", "NDUFC1", "ATP5L", "ATP5J2", "LAMTOR2", "PRDX1", "BST2", "TPI1", "POLR1D", "TMCO1", "LLPH", "ERH") # Ng Science 2024
+
+T2_Ng <- c("CXCL10", "G0S2", "OSM", "CXCL2", "ISG15", "RSAD2", "PTGS2", "ACOD1", "CD14", "IER3", "NFKBIA", "IL1B", "GBP2", "SRGN", "IFI47", "EGR1", "CXCL3", "TGM2", "PIM1", "BCL2A1B", "CCRL2", "ZFP36", "CCL4", "FOS", "XBP1", "JUNB", "IFIT3", "IFIT1", "BCL2A1A", "DUSP1", "ISG20", "CDKN1A", "SOCS3", "HCAR2", "GADD45B", "IL1R2", "BASP1", "CSTDC4", "GBP5", "CSRNP1", "JUN", "CTSS", "PLAUR", "MARCKSL1", "FTH1", "TREM1", "CD274", "CD9", "IGTP", "ZFP36L1", "ICAM1", "GM20186", "ID1", "BTG2", "CLEC4E", "UPP1", "EGLN3", "SOCS1", "GM12840", "H3F3B", "GM13822", "NINJ1", "CLEC4N", "IFIT2", "RGCC", "SKIL", "IFIT3B", "NFKBID", "CCL3", "COX17", "PLAC8", "PPP1R15A", "IRGM1", "PNP", "SAMSN1", "ZBP1", "RHOH", "THBS1", "IL1RN", "UBC", "CCL6", "IL1A", "NFKBIZ", "ATF3", "RAB20", "TNF", "TES", "NFIL3", "PTAFR", "LY6A", "AY036118", "IER2", "BHLHE40", "PNRC1", "IFI204", "RTP4", "LY6I", "CISH", "H2-K1", "CCR1", "RBPJ", "NR4A1", "STAT1", "BCL2A1D", "CSF1", "ATP6V0C", "GBP7", "BTG1", "PLEK", "PLK3", "TRIB1", "USP18") # Ng Science 2024
+
+T3_Ng <- c("HILPDA", "CCL3", "CSTB", "CXCL3", "CCL4", "SPP1", "FTH1", "CXCL2", "HCAR2", "MIF", "ERO1L", "HSPA1A", "IFRD1", "TPI1", "IL1RN", "PLIN2", "BNIP3", "CTSB", "IER3", "E230032D23RIK", "BASP1", "ATP6V0C", "LDHA", "GADD45B", "CDKN1A", "FAM162A", "FTL1", "JUN", "HSP90AA1", "INHBA", "BSG", "HMOX1", "CCRL2", "F10", "EGR1", "CD274", "CARD19", "TMEM189", "BHLHE40", "HIGD1A", "TIPARP", "GLA", "THBS1", "ATF3", "HK2", "ZEB2", "CD14", "TNFRSF23", "PGAM1", "RGS1", "HSPA1B", "TGIF1", "RNH1", "DDIT3", "EEF1A1", "BRI3", "RBPJ", "EGLN3", "BNIP3L", "CTSL", "PPP1R15A", "1700017B05RIK", "PNRC1", "FNDC3A", "CTSZ", "RPS28", "CD9", "NINJ1", "IRAK2", "XIST", "P4HA1", "CCL6", "HSPA5", "PDCD1LG2", "NFKBIA", "RPL10", "ATP6V1A", "FNIP2", "PIK3AP1", "EEA1", "PRDX6", "NAA50", "TPT1", "CCDC126", "ESD", "ENO1", "ATP6V0D2", "PTGS2", "PFKP", "BCL2A1B", "CD63", "RPL12", "RGCC", "EIF5", "ALKBH5", "LAMP1", "ATP6V1C1", "GADD45G", "CSTDC4", "EIF1", "SLC3A2", "ZFP292", "CD68", "TRA2A", "SRGN", "RPLP2", "SAP18", "SLC31A2", "SAMSN1", "ALDOA", "UPP1", "ITPR2", "MBNL2", "ETF1", "RAB20", "SLC2A1", "ST13", "PGK1", "CLEC4N", "P4HB", "MAFF", "B4GALT1", "TGOLN1", "DDIT4", "PSAP", "PFKL", "NPC2", "FOS", "TOMM20", "A930007I19RIK", "VEGFA", "NPEPPS", "CD53", "CCNL1", "ATP6V0E", "GAPDH", "RPL36", "H3F3B", "RPS8", "NCEH1", "TOMM6", "RPS2", "PLGRKT", "ANKRD33B", "SQSTM1", "RPS20", "ATF4", "RPL23", "FRRS1", "SMOX", "GNA13", "RPLP1", "TNFRSF26", "LGALS3", "RPS27", "KPNA4", "EIF4A1", "CITED2", "UBC", "DUSP5", "HBEGF", "BAX", "RHOV", "ATP6V1E1", "ACOD1", "DOCK10", "GM20406", "RPL8", "NFIL3", "SOAT1", "CSTA2", "DNAJA1", "CSF1", "GPNMB", "RAB9", "SH2B2", "SDCBP", "RPS3A1", "COX17", "SRA1", "G0S2", "NACA", "ARID5B", "FAM50A", "CNOT4", "ANKRD37", "RPL36AL", "SLC7A11", "RHOB", "VMP1", "OSBPL8", "NEK6", "SLC20A1", "RPL18", "RPS5", "CYCS", "CCL9", "PPIA", "ECHDC3", "RPL38", "LAMB3", "RPL30", "MTHFS", "MREG", "RPL19", "RPS26", "PHLDA1", "AMDHD2", "RPL22", "FAU", "LRRFIP2", "ANKRD12", "IL1A", "ATP6AP2", "NPC1", "BCL2A1A", "RPL32", "PRDX1", "NEAT1", "CANX", "MAP3K8", "HSP90B1", "RPL14", "FKBP1A", "PTMA", "RPS15A", "RPL35", "ITGB1", "DNAJB9", "DUSP1", "CLEC4E", "SLC31A1", "IMPA2", "PIM1", "GNS", "RALGDS", "CLEC4D", "ODC1", "MDM2", "EIF3A", "ZFP36L2", "RPS19", "DENR", "RPL26", "1810058I24RIK", "FNIP1", "DEDD2", "SEC61G", "ATF5", "LITAF", "RPL35A", "RPS3", "GPR137B", "HMGA1", "OSM") # Ng Science 2024
+
+Ly6E_neu <- c(
+  "IFIT1", "MX1", "HERC5", "IFI6", "ISG15", "IFIT3", "RSAD2", 
+  "GBP1", "IFIT2", "XAF1", "PARP9", "UBE2L6", "IRF7", "PARP14", "APOL6"
+) # Benguigui et al. 2024 Cancer Cell
+
+# tumor vs blood neutrophil DEGs
+tumor_vs_blood_df <- read.csv(
+  "/Users/changt7/Documents/00.PostDocWork/CancerResearch/01.Projects/00.Collaborating_projects/06.ClintAllen/02.Input/Clint_assay/DEGs_TumorNeu_vs_BloodNeu.csv",
+  row.names = 1
+) %>% na.omit()
+
+Tumor_vs_Blood_positive <- tumor_vs_blood_df$gene[
+  tumor_vs_blood_df$p_val_adj < 0.05 & tumor_vs_blood_df$avg_log2FC > 1
+]
+Tumor_vs_Blood_negative <- tumor_vs_blood_df$gene[
+  tumor_vs_blood_df$p_val_adj < 0.05 & tumor_vs_blood_df$avg_log2FC < -1
+]
+
+#### more signatures
+cluster_neuAtlas_df <- readxl::read_excel(
+  "/Users/changt7/Documents/00.PostDocWork/CancerResearch/07.scRNAseq_Datasets/Neutrophil_atlas/Marker_genes.xlsx",
+  sheet = "Table S2"
+)
+stopifnot(all(c("Gene", "Cluster") %in% colnames(cluster_neuAtlas_df)))
+# Clean cluster labels
+cluster_neuAtlas_df$Cluster_clean <- cluster_neuAtlas_df$Cluster %>%
+  gsub("\\+$", "", .) %>%
+  gsub("-", "", .) %>%
+  gsub("\\+", "_", .)
+# Split genes by cleaned cluster label
+gene_list_by_cluster <- split(cluster_neuAtlas_df$Gene, paste0(cluster_neuAtlas_df$Cluster_clean, "_neuAtlas"))
+
+gene_set_list <- list(
+  UPR_MSigDB = UPR_genes,
+  Hypoxia_MSigDB = hypoxia_genes,
+  ANGIO_MSigDB = ANGIO_genes,
+  Ly6E_neu = Ly6E_neu,
+  Tumor_vs_Blood_positive = Tumor_vs_Blood_positive,
+  Tumor_vs_Blood_negative = Tumor_vs_Blood_negative
+)
+
+# Add EGR1 signatures
+for (name in names(EGR1_sig2_thresholds)) {
+  gene_set_list[[paste0(name, "_pos")]] <- EGR1_sig2_thresholds[[name]]$pos
+  gene_set_list[[paste0(name, "_neg")]] <- EGR1_sig2_thresholds[[name]]$neg
+}
+
+# Add neutrophil atlas cluster-based signatures
+gene_set_list <- c(gene_set_list, gene_list_by_cluster)
+
+```
+
+# Load TCGA Gene Expression and Clinical Data
+```{r}
+# Load expression data
+geneExpr_TCGA <- readRDS(paste0(TCGA_data_dir, "TCGA_RSEM_gene_TPM.rds"))
+geneExpr_df <- as.data.frame(t(geneExpr_TCGA))
+geneExpr_df$SampleID <- gsub("\\.", "-", colnames(geneExpr_TCGA))
+
+# Optional: remove gene names starting with "ENSG"
+geneExpr_df <- geneExpr_df[, !grepl("^ENSG", colnames(geneExpr_df))]
+
+# Load and clean clinical data
+clinicInfo_TCGA_df <- read.table(
+  file = paste0(TCGA_data_dir, "Survival_SupplementalTable_S1_20171025_xena_sp.txt"),
+  header = TRUE, sep = "\t"
+)[, c(1:5, 7, 9, 26:33)]
+
+colnames(clinicInfo_TCGA_df) <- c(
+  "SampleID", "PatientID", "CancerType", "Age", "Sex", "Stage", "Histology",
+  "OS_event", "OS_time", "DSS_event", "DSS_time", "DFI_event", "DFI_time", "PFI_event", "PFI_time"
+)
+
+# Merge and filter
+predictor_phenotype_TCGA_df0 <- merge(
+  geneExpr_df, clinicInfo_TCGA_df, by = "SampleID", all.x = TRUE
+)
+predictor_phenotype_TCGA_df0 <- predictor_phenotype_TCGA_df0[
+  !is.na(predictor_phenotype_TCGA_df0$CancerType), ]
+predictor_phenotype_TCGA_df0 <- predictor_phenotype_TCGA_df0[
+  !grepl("-11$|-12$|-06$|-07$", predictor_phenotype_TCGA_df0$SampleID), ]
+
+
+gsva_scores_list <- list()
+cancer_types <- unique(predictor_phenotype_TCGA_df0$CancerType)
+
+for (ct in cancer_types) {
+  message(paste(ct, "in processing..."))
+  sub_df <- predictor_phenotype_TCGA_df0[predictor_phenotype_TCGA_df0$CancerType == ct, ]
+  pseudobulk_mat <- as.matrix(t(sub_df[, 2:32904]))
+  gsva_scores <- gsva(pseudobulk_mat, gene_set_list, method = "gsva")
+  gsva_scores_df <- data.frame(t(gsva_scores))
+  gsva_scores_df$CancerType_rep2 <- ct
+  gsva_scores_list[[ct]] <- gsva_scores_df
+}
+
+gsva_scores_allCancers_df <- do.call(rbind, gsva_scores_list)
+rownames(gsva_scores_allCancers_df) <- NULL
+write.csv(gsva_scores_allCancers_df, file = paste0(TCGA_data_dir, "gsva_scores.csv"))
+
+# Merge GSVA back to master table
+gsva_scores <- read.csv(paste0(TCGA_data_dir, "gsva_scores.csv"), row.names = 1)
+colnames(gsva_scores)[1:(ncol(gsva_scores) - 1)] <- paste0(colnames(gsva_scores)[1:(ncol(gsva_scores) - 1)], "_gsva")
+predictor_phenotype_TCGA_df0 <- cbind(predictor_phenotype_TCGA_df0, gsva_scores)
+
+```
+
+# Fig 6a (Extended Data Fig 7a,b) - Kaplan-Meier Survival Analysis (TCGA-HNSC, EGR1 Signature)
+```{r}
+VarOfInterest <- "EGR1_sig2_pos_5_gsva"
+cutoff <- 0.67
+
+# Subset HNSC samples
+data_plot <- predictor_phenotype_TCGA_df0[predictor_phenotype_TCGA_df0$CancerType == "HNSC", ]
+data_plot <- merge(data_plot, TCGA_clinicalInfo_df[c(1,2,3,4,9)], by.x = "SampleID", by.y = "PatientID")
+
+# Time unit conversion
+data_plot$OS_time <- data_plot$OS_time / 30
+data_plot$PFI_time <- data_plot$PFI_time / 30
+
+# Group assignment
+data_plot$Var_score <- ifelse(data_plot[[VarOfInterest]] > quantile(data_plot[[VarOfInterest]], cutoff), "High", "Low")
+data_plot$Var_score <- factor(data_plot$Var_score, levels = c("Low", "High"))
+
+##### OS Survival Analysis
+os_data <- na.omit(data.frame(Score = data_plot$Var_score, OS_Months = data_plot$OS_time, OS_Event = data_plot$OS_event))
+sfit <- survfit(Surv(OS_Months, OS_Event) ~ Score, data = os_data)
+scox <- coxph(Surv(OS_Months, OS_Event) ~ Score, data = os_data)
+HR <- round(summary(scox)$coefficients[2], 2)
+CI <- exp(confint(scox))
+P <- round(summary(scox)$coefficients[5], 3)
+
+# Plot
+pdf(paste0(result_fig_dir, "KM_curve_TCGA_HNSC_EGR1sig_OS.pdf"), width = 3.3, height = 3)
+ggsurvplot(
+  sfit, data = os_data,
+  palette = c("#00305d", "#9c1915"),
+  size = 1, conf.int = FALSE,
+  legend.labs = c("Low", "High"), legend.title = "",
+  xlab = "Time (months)", ylab = "OS probability",
+  break.time.by = 50, risk.table = TRUE, risk.table.height = 0.25,
+  risk.table.pos = "out", risk.table.col = "black",
+  legend = c(0.65, 0.9), font.tickslab = 12,
+  ggtheme = theme_classic()
+) + annotate("text", x = 0, y = 0.15, label = paste0("HR = ", HR, " (", round(CI[1], 2), "-", round(CI[2], 2), ")\np = ", P), size = 5, hjust = 0)
+dev.off()
+
+
+
+##### PFS Survival Analysis
+pfs_data <- na.omit(data.frame(Score = data_plot$Var_score, PFS_Months = data_plot$PFI_time, PFS_Event = data_plot$PFI_event))
+sfit <- survfit(Surv(PFS_Months, PFS_Event) ~ Score, data = pfs_data)
+scox <- coxph(Surv(PFS_Months, PFS_Event) ~ Score, data = pfs_data)
+HR <- round(summary(scox)$coefficients[2], 2)
+CI <- exp(confint(scox))
+P <- round(summary(scox)$coefficients[5], 3)
+
+pdf(paste0(result_fig_dir, "KM_curve_TCGA_HNSC_EGR1sig_PFS.pdf"), width = 3.3, height = 3)
+ggsurvplot(
+  sfit, data = pfs_data,
+  palette = c("#00305d", "#9c1915"),
+  size = 1, conf.int = FALSE,
+  legend.labs = c("Low", "High"), legend.title = "",
+  xlab = "Time (months)", ylab = "PFS probability",
+  break.time.by = 50, risk.table = TRUE, risk.table.height = 0.25,
+  risk.table.pos = "out", risk.table.col = "black",
+  legend = c(0.65, 0.9), font.tickslab = 12,
+  ggtheme = theme_classic()
+) + annotate("text", x = 0, y = 0.15, label = paste0("HR = ", HR, " (", round(CI[1], 2), "-", round(CI[2], 2), ")\np = ", P), size = 5, hjust = 0)
+dev.off()
+
+
+```
+
+# Extended Data Fig 7d - Forest Plot of OS versus EGR1 Signatures with Various Cutoffs
+```{r}
+signatures_test <- c("EGR1_sig2_pos_5_gsva", "EGR1_sig2_pos_10_gsva", "EGR1_sig2_pos_20_gsva", "EGR1_sig2_pos_30_gsva")
+signatures_showName <- c("EGR1 sig. (logFC>0.5)", "EGR1 sig2. (logFC>1)", "EGR1 sig3. (logFC>2)", "EGR1 sig4. (logFC>3)")
+
+data_all <- predictor_phenotype_TCGA_df0[c(signatures_test, "OS_event", "OS_time", "PFI_event", "PFI_time", "CancerType")]
+data_all <- data_all[data_all$CancerType == "HNSC", ]
+colnames(data_all) <- c(signatures_showName, "OS_event", "OS_time", "PFS_event", "PFS_time", "CancerType")
+
+# Set analysis params
+quantile_cutoff_upper <- 0.67
+result_OS_PFS_df <- data.frame()
+
+for (sig in signatures_showName) {
+  # OS
+  cancerData <- data_all[, c(sig, "OS_event", "OS_time")]
+  cancerData <- na.omit(cancerData)
+  colnames(cancerData) <- c("Score", "OS_Event", "OS_Time")
+  cancerData$Score <- ifelse(cancerData$Score > quantile(cancerData$Score, quantile_cutoff_upper), 1, 0)
+
+  scox <- coxph(Surv(OS_Time, OS_Event) ~ Score, data = cancerData)
+  scox_summary <- summary(scox)
+
+  # PFS
+  cancerData2 <- data_all[, c(sig, "PFS_event", "PFS_time")]
+  cancerData2 <- na.omit(cancerData2)
+  colnames(cancerData2) <- c("Score", "PFS_Event", "PFS_Time")
+  cancerData2$Score <- ifelse(cancerData2$Score > quantile(cancerData2$Score, quantile_cutoff_upper), 1, 0)
+
+  scox2 <- coxph(Surv(PFS_Time, PFS_Event) ~ Score, data = cancerData2)
+  scox2_summary <- summary(scox2)
+
+  result_OS_PFS_df <- rbind(result_OS_PFS_df, data.frame(
+    Signature = sig,
+    HR_OS = scox_summary$coefficients[2],
+    HR_OS_low = scox_summary$conf.int[3],
+    HR_OS_up = scox_summary$conf.int[4],
+    pval_OS = scox_summary$coefficients[5],
+    HR_PFS = scox2_summary$coefficients[2],
+    HR_PFS_low = scox2_summary$conf.int[3],
+    HR_PFS_up = scox2_summary$conf.int[4],
+    pval_PFS = scox2_summary$coefficients[5]
+  ))
+}
+
+
+
+# Prepare plotting data
+plot_data <- tibble::tibble(
+  mean = result_OS_PFS_df$HR_OS,
+  lower = result_OS_PFS_df$HR_OS_low,
+  upper = result_OS_PFS_df$HR_OS_up,
+  cellType = result_OS_PFS_df$Signature,
+  effSize = round(result_OS_PFS_df$HR_OS, 3),
+  pval = result_OS_PFS_df$pval_OS
+)
+
+# Format p-values
+plot_data$pval <- sapply(plot_data$pval, function(p) {
+  if (p >= 0.1) round(p, 2) else format(p, scientific = TRUE, digits = 2)
+})
+
+# Plot settings
+pdf_file <- paste0(result_fig_dir, "Forest_TCGA_HNSC_EGR1_cutoffs_OS.pdf")
+pdf(pdf_file, width = 5.5, height = 4)
+
+plot_data %>%
+  forestplot(labeltext = c("effSize", "cellType", "pval"),
+             graph.pos = 3,
+             boxsize = 0.35,
+             vertices = TRUE,
+             clip = c(0, 3),
+             xlog = FALSE,
+             zero = 1,
+             xticks = c(0, 1, 2),
+             txt_gp = fpTxtGp(ticks = gpar(cex = 1.2),
+                              label = gpar(cex = 1.2),
+                              xlab = gpar(cex = 1.2)),
+             xlab = "HR of OS",
+             graphwidth = unit(3, "cm"),
+             lineheight = unit(2, "cm")) %>%
+  fp_set_style(box = "black", line = "black") %>%
+  fp_add_header(
+    effSize = c("HR") |> fp_txt_plain() |> fp_align_left(),
+    cellType = c("Signature") |> fp_txt_plain() |> fp_align_left(),
+    pval = c("P-value") |> fp_txt_plain() |> fp_align_right()
+  )
+dev.off()
+
+
+```
+
+# Fig 6b (Extended Data Fig 7c) - Multivariable Forest Plot (EGR1 Signature + Clinical Covariates)
+```{r}
+# Extract clinical variables and outcome for HNSC
+columns_keep <- c("EGR1_sig2_pos_5_gsva", "OS_time", "OS_event", "PFI_time", "PFI_event", "Age", "Sex", "Stage", "HPV")
+data_plot <- predictor_phenotype_TCGA_df0[predictor_phenotype_TCGA_df0$CancerType == "HNSC", ]
+data_plot <- merge(data_plot, TCGA_clinicalInfo_df[c(1,2,3,4,9)], by.x = "SampleID", by.y = "PatientID")
+data_plot <- data_plot[columns_keep]
+data_plot <- data_plot[data_plot$Stage != "Unknown" & data_plot$HPV != "Unknown", ]
+
+# Initialize result container
+result_df <- data.frame(
+  Variable = c("EGR1 sig.", "Age", "Sex", "Stage", "HPV"),
+  HR_OS = NA, HR_OS_low = NA, HR_OS_up = NA, p_val_OS = NA,
+  HR_PFS = NA, HR_PFS_low = NA, HR_PFS_up = NA, p_val_PFS = NA
+)
+
+# Binary split
+Score <- ifelse(data_plot$EGR1_sig2_pos_5_gsva > quantile(data_plot$EGR1_sig2_pos_5_gsva, 0.67), "High", "Low")
+Score <- factor(Score, levels = c("Low", "High"))
+
+# OS model
+cancerData_OS <- data.frame(Score, data_plot[, c("Age", "Sex", "Stage", "HPV", "OS_time", "OS_event")])
+scox_OS <- coxph(Surv(OS_time, OS_event) ~ Score + Age + Sex + Stage + HPV, data = cancerData_OS)
+scox_coef_OS <- summary(scox_OS)$coefficients
+
+# PFS model
+cancerData_PFS <- data.frame(Score, data_plot[, c("Age", "Sex", "Stage", "HPV", "PFI_time", "PFI_event")])
+scox_PFS <- coxph(Surv(PFI_time, PFI_event) ~ Score + Age + Sex + Stage + HPV, data = cancerData_PFS)
+scox_coef_PFS <- summary(scox_PFS)$coefficients
+
+# Store results
+result_df[, 2:5] <- cbind(scox_coef_OS[, "exp(coef)"], confint(scox_OS)[,1], confint(scox_OS)[,2], scox_coef_OS[, "Pr(>|z|)"])
+result_df[, 6:9] <- cbind(scox_coef_PFS[, "exp(coef)"], confint(scox_PFS)[,1], confint(scox_PFS)[,2], scox_coef_PFS[, "Pr(>|z|)"])
+
+
+######## Multivariable Forest Plot for OS
+plot_data <- tibble::tibble(
+  mean = result_df$HR_OS,
+  lower = result_df$HR_OS_low,
+  upper = result_df$HR_OS_up,
+  Variable = result_df$Variable,
+  effSize = round(result_df$HR_OS, 3),
+  pval = sapply(result_df$p_val_OS, function(p) if (p >= 0.1) round(p, 2) else format(p, scientific = TRUE, digits = 2))
+)
+
+# Plot
+pdf_file <- paste0(result_fig_dir, "Forest_TCGA_HNSC_EGR1sig_clinicalVARs_MHR_OS.pdf")
+pdf(pdf_file, width = 4.4, height = 3.9)
+
+plot_data %>%
+  forestplot(labeltext = c("effSize", "Variable", "pval"),
+             graph.pos = 3, boxsize = 0.35,
+             vertices = TRUE, clip = c(0, 3),
+             xlog = FALSE, zero = 1, xticks = c(0, 1, 2),
+             txt_gp = fpTxtGp(ticks = gpar(cex = 1.2),
+                              label = gpar(cex = 1.2),
+                              xlab = gpar(cex = 1.2)),
+             xlab = "HR of OS", graphwidth = unit(3, "cm"),
+             lineheight = unit(2, "cm")) %>%
+  fp_set_style(box = "black", line = "black") %>%
+  fp_add_header(
+    effSize = "HR" |> fp_txt_plain() |> fp_align_left(),
+    Variable = "Variable" |> fp_txt_plain() |> fp_align_left(),
+    pval = "P-value" |> fp_txt_plain() |> fp_align_right()
+  )
+dev.off()
+
+
+
+######## Multivariable Forest Plot for PFS
+plot_data <- tibble::tibble(
+  mean = result_df$HR_PFS,
+  lower = result_df$HR_PFS_low,
+  upper = result_df$HR_PFS_up,
+  Variable = result_df$Variable,
+  effSize = round(result_df$HR_PFS, 3),
+  pval = sapply(result_df$p_val_PFS, function(p) if (p >= 0.1) round(p, 2) else format(p, scientific = TRUE, digits = 2))
+)
+
+pdf_file <- paste0(result_fig_dir, "Forest_TCGA_HNSC_EGR1sig_clinicalVARs_HR_PFS.pdf")
+pdf(pdf_file, width = 4.4, height = 3.9)
+
+plot_data %>%
+  forestplot(labeltext = c("effSize", "Variable", "pval"),
+             graph.pos = 3, boxsize = 0.35,
+             vertices = TRUE, clip = c(0, 3),
+             xlog = FALSE, zero = 1, xticks = c(0, 1, 2),
+             txt_gp = fpTxtGp(ticks = gpar(cex = 1.2),
+                              label = gpar(cex = 1.2),
+                              xlab = gpar(cex = 1.2)),
+             xlab = "HR of PFS", graphwidth = unit(3, "cm"),
+             lineheight = unit(2, "cm")) %>%
+  fp_set_style(box = "black", line = "black") %>%
+  fp_add_header(
+    effSize = "HR" |> fp_txt_plain() |> fp_align_left(),
+    Variable = "Variable" |> fp_txt_plain() |> fp_align_left(),
+    pval = "P-value" |> fp_txt_plain() |> fp_align_right()
+  )
+dev.off()
+
+
+```
+
+# Fig 6c - Pan-Cancer Dot Plot of Neutrophil Signature Hazard Ratios
+```{r}
+signatures_test <- c(
+  "EGR1_sig2_pos_5_gsva", "EGR1_sig2_neg_5_gsva", "Tumor_vs_Blood_positive_gsva",
+  "Tumor_vs_Blood_negative_gsva", "T1_Ng_gsva", "T2_Ng_gsva", "T3_Ng_gsva",
+  "HLADR_CD74_neuAtlas_gsva", "Ly6E_neu_gsva"
+)
+
+signatures_showName <- c(
+  "EGR1 sig.", "EGR1 neg. sig.", "Tumor neutro. sig.", "Blood neutro. sig.",
+  "T1 neutro. sig.", "T2 neutro. sig.", "T3 neutro. sig.",
+  "HLADR+CD74+ neutro. sig.", "Ly6E neutro. sig."
+)
+
+data_all <- predictor_phenotype_TCGA_df0[, c(signatures_test, "OS_event", "OS_time", "CancerType")]
+colnames(data_all) <- c(signatures_showName, "OS_event", "OS_time", "CancerType")
+
+# Exclude leukemia (not relevant for neutrophils)
+cancer_types <- setdiff(unique(data_all$CancerType), "LAML")
+
+# Initialize matrices
+result_HR <- matrix(NA, nrow = length(signatures_showName), ncol = length(cancer_types),
+                    dimnames = list(signatures_showName, cancer_types))
+result_pval <- result_HR
+
+# Run Cox model per signature per cancer type
+for (sig in signatures_showName) {
+  for (ct in cancer_types) {
+    subset_df <- data_all[data_all$CancerType == ct, ]
+    subset_df$binary <- ifelse(subset_df[[sig]] >= quantile(subset_df[[sig]], 0.67, na.rm = TRUE), "High", "Low")
+    subset_df$binary <- factor(subset_df$binary, levels = c("Low", "High"))
+    
+    if (length(unique(subset_df$binary)) > 1) {
+      fit <- coxph(Surv(OS_time, OS_event) ~ binary, data = subset_df)
+      result_HR[sig, ct] <- summary(fit)$coefficients[1, "exp(coef)"]
+      result_pval[sig, ct] <- summary(fit)$coefficients[1, "Pr(>|z|)"]
+    }
+  }
+}
+
+
+
+# Prepare for ggplot
+plot_df <- data.frame(
+  Signature = rep(rownames(result_HR), times = length(cancer_types)),
+  CancerType = rep(cancer_types, each = nrow(result_HR)),
+  HR = as.vector(result_HR),
+  pval = as.vector(result_pval)
+)
+
+plot_df <- plot_df %>%
+  mutate(
+    logP = ifelse(is.na(pval) | pval > 0.05, 0, -log10(pval)),
+    HR = pmin(HR, quantile(HR, 0.95, na.rm = TRUE)),
+    Signature = factor(Signature, levels = rev(signatures_showName))
+  )
+
+# Create plot
+p <- ggplot(plot_df, aes(x = CancerType, y = Signature)) +
+  geom_point(aes(size = logP, fill = HR), shape = 21, color = "black", stroke = 0.2) +
+  scale_fill_gradient2(midpoint = 1, low = "blue", mid = "white", high = "red", name = "Hazard Ratio") +
+  scale_size_continuous(range = c(0, 5), name = "-log10(p)", breaks = c(0, 1, 2, 3)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, color = "black"),
+    axis.text.y = element_text(color = "black"),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    panel.border = element_blank(),
+    axis.line = element_line(color = "black")
+  )
+
+# Save to PDF
+pdf(paste0(result_fig_dir, "Neutrophil_signatures_panCancer_HR_dotplot.pdf"), width = 7.5, height = 2.5)
+print(p)
+dev.off()
+
+
+```
+

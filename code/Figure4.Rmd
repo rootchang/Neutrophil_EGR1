@@ -1,0 +1,193 @@
+---
+title: "Differential gene expression analysis between wild-type mouse tumor neutrophils vs Egr1-KO tumor neutrophils"
+author: "Tiangen Chang tiangen.chang@nih.gov"
+output: 
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 2
+
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      comment = FALSE, 
+                      warning = FALSE, 
+                      message = FALSE)
+require(ggplot2)
+ggplot2::theme_set(new = theme_bw(base_size = 12))
+```
+
+# load required package
+```{r}
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(dplyr)
+library(tidyverse)
+library(patchwork)
+library(RColorBrewer)
+library(Seurat)
+library(celldex)
+library(SeuratWrappers)
+library(scales)
+library(tibble)
+library(biomaRt)
+library(AUCell)
+library(ggrepel)
+library(msigdbr)
+library(clusterProfiler)
+library(org.Mm.eg.db)
+library(DOSE)
+
+```
+
+# Differential Expression Analysis
+```{r}
+merged_seu_neutrophils <- readRDS(file = file.path(data_dir, "seu_all_mito20.rds"))
+Idents(merged_seu_neutrophils) <- "Sample_new"
+
+DEGs <- FindMarkers(
+  merged_seu_neutrophils,
+  ident.1 = "3_Egr1_WT",
+  ident.2 = "4_Egr1_KO",
+  logfc.threshold = 0,
+  min.pct = 0,
+  test.use = "wilcox"
+)
+
+DEGs$gene <- rownames(DEGs)
+DEGs$p_val_adj[DEGs$p_val_adj < 1e-300] <- 1e-299
+
+genes_of_interest1 <- c(
+  "Egr1", "Cxcl2", "Il1b", "Il1a", "Ptgs2", "Osm", "Olr1", "Socs3", "G0s2",
+  "Plaur", "Acod1", "Cdkn1a", "Hif1a", "Slc2a1", "Pgk1", "Hk2", "Ldha", "Vegfa",
+  "Ccl3", "Ccl4", "Jun", "Junb"
+)
+
+```
+
+# Fig 4g – Volcano Plot 
+```{r}
+de_df <- DEGs
+de_df$gene_symbol <- rownames(de_df)
+de_df$p_val_adj[de_df$p_val_adj < 1e-300] <- 1e-300
+
+fc_cutoff <- 0.25
+pval_cutoff <- 0.05
+x_max <- 5
+y_max <- 300
+font_size <- 14
+
+de_df <- de_df %>%
+  mutate(
+    diffexpressed = case_when(
+      avg_log2FC < -fc_cutoff & p_val_adj < pval_cutoff ~ "down",
+      avg_log2FC > fc_cutoff & p_val_adj < pval_cutoff ~ "up",
+      TRUE ~ "ns"
+    ),
+    delabel = ifelse(gene_symbol %in% head(de_df[order(p_val_adj), "gene_symbol"], 15), gene_symbol, NA)
+  )
+
+myvolcanoplot <- ggplot(de_df, aes(x = avg_log2FC, y = -log10(p_val_adj), col = diffexpressed, label = delabel)) +
+  geom_vline(xintercept = c(-fc_cutoff, fc_cutoff), linetype = "dashed", color = "gray") +
+  geom_hline(yintercept = -log10(pval_cutoff), linetype = "dashed", color = "gray") +
+  geom_point(size = 2) +
+  scale_color_manual(values = c("down" = "#00AFBB", "ns" = "grey", "up" = "#bb0c00")) +
+  geom_text_repel(max.overlaps = Inf, color = "black", box.padding = 0.5, point.padding = 0.3, size = 4) +
+  coord_cartesian(ylim = c(0.1, y_max), xlim = c(-x_max, x_max)) +
+  labs(x = expression("Log"[2]*" (fold change)"), y = expression("-Log"[10]*" (adj. p)")) +
+  theme_classic(base_size = font_size) +
+  theme(panel.grid = element_blank(), legend.position = "none")
+
+ggsave(filename = file.path(fig_dir, "Volcano_plot_WT_vs_Egr1KO.pdf"), plot = myvolcanoplot, width = 4, height = 3.5)
+
+
+```
+
+# Fig 4h – MSigDB Pathway Enrichment
+```{r}
+msigdb_mouse <- msigdbr(species = "Mus musculus", category = "H")
+msigdb_list <- msigdb_mouse %>%
+  dplyr::select(gs_name, entrez_gene) %>%
+  mutate(entrez_gene = as.character(entrez_gene))
+
+# Pathway renaming
+all_pathways_short <- c(
+  "Adipogenesis", "Allograft rejection", "Androgen response", "Angiogenesis", "Apical junction", "Apical surface",
+  "Apoptosis", "Bile acid metabolism", "Cholesterol homeostasis", "Coagulation", "Complement", "DNA repair", "E2F targets",
+  "Epithelial mesenchymal transition", "Estrogen response (early)", "Estrogen response (late)", "Fatty acid metabolism",
+  "G2M checkpoint", "Glycolysis", "Hedgehog signaling", "Heme metabolism", "Hypoxia", "IL2/STAT5 signaling",
+  "IL6/JAK/STAT3 signaling", "Inflammatory response", "IFN-alpha response", "IFN-gamma response", "KRAS signaling (down)",
+  "KRAS signaling (up)", "Mitotic spindle", "MTORC1 signaling", "MYC targets (v1)", "MYC targets (v2)", "Myogenesis",
+  "NOTCH signaling", "Oxidative phosphorylation", "P53 pathway", "Pancreas beta cells", "Peroxisome",
+  "PI3K/AKT/MTOR signaling", "Protein secretion", "Reactive oxygen species pathway", "Spermatogenesis", "TGF-beta signaling",
+  "TNFA signaling via NFKB", "Unfolded protein response", "UV response (down)", "UV response (up)", "WNT-beta/Catenin signaling",
+  "Xenobiotic metabolism"
+)
+
+pathways_mapping <- setNames(all_pathways_short, unique(msigdb_list$gs_name))
+
+# Filter DE genes
+genes_of_interest <- rownames(DEGs)[DEGs$avg_log2FC > fc_cutoff & DEGs$p_val_adj < pval_cutoff]
+
+# Convert to Entrez
+gene_entrez <- na.omit(mapIds(org.Mm.eg.db, keys = genes_of_interest, column = "ENTREZID", keytype = "SYMBOL", multiVals = "first"))
+gene_entrez <- as.character(gene_entrez)
+
+# Enrichment
+msigdb_res <- enricher(gene = gene_entrez, TERM2GENE = msigdb_list, pvalueCutoff = 0.05)
+res_df <- as.data.frame(msigdb_res)
+res_df$Description <- pathways_mapping[res_df$ID]
+msigdb_res@result$Description[1:nrow(res_df)] <- res_df$Description
+
+# Plot
+pdf(file = file.path(fig_dir, "Barplot_pathwayEnrich_WT_vs_Egr1KO_msigdb.pdf"), width = 4.4, height = 3.1)
+barplot(msigdb_res, showCategory = nrow(res_df), p.adjust.digits = 1) +
+  theme_classic(base_size = 16) +
+  labs(x = "Gene count") +
+  guides(fill = guide_colorbar(title = "Adj. p")) +
+  theme(panel.grid = element_blank(), axis.text = element_text(color = "black"), axis.line = element_line(color = "black"))
+dev.off()
+
+```
+
+# Fig 4i - Suppressive Gene FC Plot 
+```{r}
+genes_test <- c("Olr1", "Osm", "Arg1", "Cd274", "Tgfb1", "Il10", "Nos2", "Cybb", "Ido1",
+                "Cxcl1", "Cxcl5", "Cxcl2", "S100a8", "S100a9", "Il4ra", "Stat3", "Mmp9",
+                "Ptgs2", "Il6", "Slc27a2", "Cebpb", "Il1a", "Il1b", "Tnf")
+
+filtered_data <- DEGs %>%
+  filter(gene %in% genes_test) %>%
+  mutate(
+    mean_FDR = p_val_adj,
+    FDR_category = case_when(
+      mean_FDR > 0.05 ~ "High FDR",
+      mean_FDR <= 0.05 & mean_FDR > 0.001 ~ "Moderate FDR",
+      mean_FDR <= 0.001 ~ "Low FDR"
+    ),
+    fdr_label = sapply(mean_FDR, function(p) {
+      if (p == 0) return("FDR==0")
+      exp10 <- floor(log10(p))
+      coef <- signif(p / 10^exp10, 1)
+      sprintf("FDR==%s%%*%%10^%s", coef, exp10)
+    })
+  )
+
+custom_colors <- c("Low FDR" = "red", "Moderate FDR" = "white", "High FDR" = "grey")
+
+p <- ggplot(filtered_data, aes(x = reorder(gene, -avg_log2FC), y = avg_log2FC, fill = FDR_category)) +
+  geom_bar(stat = "identity", color = "black", width = 0.9) +
+  scale_fill_manual(values = custom_colors) +
+  geom_text(aes(label = fdr_label, y = ifelse(avg_log2FC < 0, 0, avg_log2FC)), parse = TRUE,
+            angle = 90, hjust = -0.05, size = 5) +
+  labs(x = "Potentially immune suppressive genes", y = expression("Log"[2]*" (fold change)")) +
+  coord_cartesian(ylim = c(-5, 15)) +
+  theme_classic(base_size = 17) +
+  theme(panel.grid = element_blank(), axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, face = "italic"))
+
+ggsave(filename = file.path(fig_dir, "FoldChange_keyGenes_WT_vs_Egr1KO.pdf"), plot = p, width = 6.5, height = 4.5)
+
+```
+
+

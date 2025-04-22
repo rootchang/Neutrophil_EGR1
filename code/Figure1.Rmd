@@ -1,0 +1,579 @@
+---
+title: "Figure 1. Immunosuppressive neutrophils infiltrate human oral cavity cancers and upregulate EGR1"
+author: "Tiangen Chang tiangen.chang@nih.gov"
+output: 
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 2
+vignette: >
+  %\VignetteIndexEntry{}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      comment = FALSE, 
+                      warning = FALSE, 
+                      message = FALSE)
+require(ggplot2)
+ggplot2::theme_set(new = theme_bw(base_size = 12))
+```
+
+# load required package
+```{r, include=FALSE}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+library(stringr)
+library(ggrepel) 
+library(gridExtra)
+
+```
+
+# Load Data (Clint)
+```{r}
+seu_neu <- readRDS(file = paste0(input_dir, "seu_neu_merged.rds"))
+
+CD15_TPM <- read.csv(paste0(processed_dir, "Clint_merged_pseudobulk_TPM_Neutrophils.txt"), row.names = 1)
+CD15_TPM <- log1p(CD15_TPM)
+
+expressed_genes <- read.csv(paste0(processed_dir, "Clint_expressedGenes_Neutrophils.txt"), header = TRUE)
+
+```
+
+# Correlation Between Gene Expression and Suppression Score
+```{r} 
+gene_names <- rownames(CD15_TPM)
+
+score_raw <- read.csv(paste0(input_dir, "suppression_meta.csv"))
+score_raw$Patient_ID <- gsub("_", "", score_raw$Patient_ID)
+score_raw$Patient_Compartment <- paste(score_raw$Patient_ID, score_raw$Compartment, sep = ".")
+
+score_raw_CD15 <- score_raw[score_raw$sort == "CD15", ]
+score_mean_CD15 <- score_raw_CD15 %>%
+  group_by(Patient_Compartment) %>%
+  dplyr::summarize(mean_suppression = mean(suppression))
+
+score_mean_CD15 <- data.frame(t(score_mean_CD15))
+colnames(score_mean_CD15) <- score_mean_CD15[1, ]
+score_mean_CD15 <- score_mean_CD15[-1, ]
+score_mean_CD15 <- data.frame(lapply(score_mean_CD15, as.numeric))
+rownames(score_mean_CD15) <- "Score"
+
+CD15_TPM_score <- bind_rows(CD15_TPM, score_mean_CD15)
+CD15_TPM_score <- CD15_TPM_score[, colSums(is.na(CD15_TPM_score)) == 0]
+
+result_df <- data.frame(
+  gene = character(),
+  CD15_scc = numeric(),
+  CD15_scc_pval = numeric(),
+  CD15_pcc = numeric(),
+  CD15_pcc_pval = numeric()
+)
+
+selected_cols <- 1:ncol(CD15_TPM_score)
+test_genes <- rownames(CD15_TPM_score)
+
+for (tg_i in seq_along(test_genes)) {
+  if (tg_i %% 1000 == 0) print(paste(tg_i, "processed..."))
+  
+  tg <- test_genes[tg_i]
+  
+  a <- cor.test(as.numeric(CD15_TPM_score[tg, selected_cols]),
+                as.numeric(CD15_TPM_score["Score", selected_cols]),
+                method = "spearman")
+  b <- cor.test(as.numeric(CD15_TPM_score[tg, selected_cols]),
+                as.numeric(CD15_TPM_score["Score", selected_cols]),
+                method = "pearson")
+  
+  result_df[tg_i, ] <- c(tg, a$estimate[[1]], a$p.value, b$estimate[[1]], b$p.value)
+}
+
+result_df2 <- result_df[order(-result_df$CD15_scc - result_df$CD15_pcc), ]
+print(result_df2[1:10, ])
+write.csv(result_df2, file = paste0(processed_dir, "AllGenes_CD15_suppresion_cor.csv"))
+
+```
+
+# Fig 1h — Volcano Plot
+```{r}
+result_df2 <- read.csv(file = paste0(processed_dir, "AllGenes_CD15_suppresion_cor.csv"))
+result_df3 <- result_df2[result_df2$gene %in% expressed_genes$x, ]
+
+result_df3$CD15_scc_fdr <- p.adjust(result_df3$CD15_scc_pval, method = "BH")
+result_df3$CD15_pcc_fdr <- p.adjust(result_df3$CD15_pcc_pval, method = "BH")
+
+result_df3$mean_cor <- rowMeans(result_df3[, c("CD15_scc", "CD15_pcc")], na.rm = TRUE)
+result_df3$mean_FDR <- apply(result_df3[, c("CD15_scc_fdr", "CD15_pcc_fdr")], 1, max, na.rm = TRUE)
+
+result_df3 <- result_df3[order(-result_df3$CD15_pcc), ]
+result_df3 <- result_df3[result_df3$gene != "Score", ]
+
+de_df <- result_df3[c("gene", "mean_cor", "mean_FDR")]
+colnames(de_df) <- c("gene_symbol", "mean_cor", "mean_FDR")
+
+fc_cutoff <- 0.25
+pval_cutoff <- 0.05
+x_max <- 1
+y_max <- 2.3
+
+de_df$diffexpressed <- "ns"
+de_df$diffexpressed[de_df$mean_cor < -fc_cutoff & de_df$mean_FDR < pval_cutoff] <- "down"
+de_df$diffexpressed[de_df$mean_cor > fc_cutoff & de_df$mean_FDR < pval_cutoff] <- "up"
+de_df_sig <- de_df[de_df$diffexpressed != "ns", ]
+
+de_df_up <- de_df_sig[de_df_sig$mean_cor > 0, ]
+de_df_down <- de_df_sig[de_df_sig$mean_cor < 0, ]
+
+top_up_genes <- head(de_df_up[order(de_df_up$mean_FDR), "gene_symbol"], 10)
+top_down_genes <- head(de_df_down[order(de_df_down$mean_FDR), "gene_symbol"], 0)
+
+label_genes <- union(top_up_genes, top_down_genes)
+de_df$delabel <- ifelse(de_df$gene_symbol %in% label_genes, de_df$gene_symbol, NA)
+
+fdr_values <- c(0.01, 0.05, 0.1, 1)
+log_fdr_values <- -log10(fdr_values)
+font_size <- 14
+
+myvolcanoplot <- ggplot(data = de_df, aes(x = mean_cor, y = -log10(mean_FDR), col = diffexpressed, label = delabel)) +
+  geom_hline(yintercept = -log10(pval_cutoff), col = "gray", linetype = 'dashed') +
+  geom_point(size = 2) +
+  scale_color_manual(values = c("#00AFBB", "grey", "#bb0c00")) +
+  coord_cartesian(ylim = c(0.1, y_max), xlim = c(-x_max, x_max)) +
+  labs(color = 'FC', x = expression("Correlation"), y = expression("FDR")) +
+  scale_x_continuous(breaks = seq(-x_max, x_max, x_max / 2)) +
+  scale_y_continuous(breaks = log_fdr_values, labels = fdr_values) +
+  guides(col = "none") +
+  geom_text_repel(max.overlaps = Inf, color = "black") +
+  theme_minimal(base_size = font_size) +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.grid = element_blank(),
+    axis.line = element_line(color = "black"),
+    axis.title.y = element_text(margin = margin(0, 5, 0, 0)),
+    axis.title.x = element_text(hjust = 0.5, margin = margin(5, 0, 0, 0)),
+    axis.text.x = element_text(color = "black"),
+    axis.text.y = element_text(color = "black"),
+    legend.position = "none"
+  )
+
+pdf(file = paste0(fig_dir, "Volcano_plot_Clint_suppression.pdf"), width = 4, height = 3.5)
+myvolcanoplot
+dev.off()
+
+```
+
+# Fig 1i — Scatter Plot (EGR1 vs Suppression Score)
+```{r}
+all_info <- CD15_TPM_score[c("EGR1", "Score"), , drop = FALSE]
+all_info <- data.frame(t(all_info))
+
+pdf_file <- paste0(fig_dir, "Clint_EGR1_suppressionScore_cor.pdf")
+fig_width <- 3.78
+fig_height <- 3.02
+xlabel <- "EGR1 expression"
+ylabel <- "% T cell suppression"
+
+pcc <- cor(all_info$EGR1, all_info$Score, method = "pearson")
+p_val <- cor.test(all_info$EGR1, all_info$Score, method = "pearson")$p.value
+scc <- cor(all_info$EGR1, all_info$Score, method = "spearman")
+p_val2 <- cor.test(all_info$EGR1, all_info$Score, method = "spearman")$p.value
+
+label <- sprintf("PCC = %.2f, p = %.1g\nSCC = %.2f, p = %.1g", pcc, p_val, scc, p_val2)
+
+new_data <- data.frame(EGR1 = seq(min(all_info$EGR1), max(all_info$EGR1), by = 0.1))
+predicted_values <- predict(lm(Score ~ EGR1, data = all_info), newdata = new_data)
+conf_interval <- predict(lm(Score ~ EGR1, data = all_info), newdata = new_data, interval = "confidence", level = 0.95)
+
+new_data$ymin <- conf_interval[, "lwr"]
+new_data$ymax <- conf_interval[, "upr"]
+new_data$Score <- predicted_values
+
+pdf(pdf_file, onefile = FALSE, width = fig_width, height = fig_height)
+ggplot(all_info, aes(x = EGR1, y = Score)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_ribbon(data = new_data, aes(ymin = ymin, ymax = ymax), fill = "lightblue", alpha = 0.5) +
+  annotate("text", x = min(all_info$EGR1), y = max(all_info$Score) * 0.9, hjust = 0, label = label, size = 5) +
+  labs(x = xlabel, y = ylabel) +
+  theme(
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "white"),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black"),
+    axis.text = element_text(color = "black"),
+    panel.border = element_blank()
+  )
+dev.off()
+
+```
+
+# Fig 1j — UMAP and EGR1 Expression
+```{r}
+colors <- c("#E69F00", "#56B4E9", "#009E73")
+font_size <- 14
+
+p <- DimPlot(seu_neu, reduction = "umap", group.by = "compartment", label = FALSE, repel = TRUE) +
+  scale_color_manual(values = colors) +
+  labs(x = "UMAP 1", y = "UMAP 2") +
+  theme(
+    axis.title.y = element_text(margin = margin(0, 5, 0, 0), size = rel(1.1), color = 'black'),
+    axis.title.x = element_text(hjust = 0.5, margin = margin(5, 0, 0, 0), size = rel(1.1), color = 'black'),
+    plot.title = element_text(hjust = 0.5, size = font_size),
+    axis.text = element_text(color = "black"),
+    text = element_text(size = font_size),
+    legend.text = element_text(size = font_size),
+    legend.title = element_text(size = font_size),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(fill = "transparent", color = NA),
+    legend.position = c(0.02, 1.26),
+    legend.justification = c(0, 1)
+  )
+
+ggsave(filename = paste0(fig_dir, "Clint_seu_neu_umap_meta.pdf"),
+       plot = p, width = 3, height = 3, units = "in", bg = "transparent")
+
+seu_neu$EGR1_status <- ifelse(FetchData(seu_neu, vars = "EGR1") > 0, "EGR1+", "EGR1-")
+
+p <- FeaturePlot(seu_neu, features = "EGR1", reduction = "umap", cols = c("lightgray", "blue")) +
+  labs(x = "UMAP 1", y = "UMAP 2") +
+  ggtitle("")
+
+ggsave(filename = paste0(fig_dir, "Clint_seu_neu_umap_EGR1_expr.pdf"),
+       plot = p, width = 3, height = 2.4, units = "in", bg = "transparent")
+
+```
+
+# Fig 1k — Violin Plot (EGR1 in different neutrophils)
+```{r}
+gene_test <- "EGR1"
+egr1_data <- FetchData(seu_neu, vars = c(gene_test, "compartment"))
+colnames(egr1_data) <- c("EGR1", "compartment")
+
+compartment_colors <- c(
+  "High density (blood)" = "#E69F00",
+  "Low density (blood)" = "#56B4E9",
+  "Tumor" = "#009E73"
+)
+
+font_size <- 14
+
+p <- ggplot(egr1_data, aes(x = compartment, y = EGR1, fill = compartment)) +
+  geom_jitter(shape = 16, size = 0.5, width = 0.2, alpha = 0.6) +
+  geom_violin(scale = "width", trim = TRUE, alpha = 0.8) +
+  geom_boxplot(width = 0.15, fill = "white", color = "black", outlier.shape = NA) +
+  scale_fill_manual(values = compartment_colors) +
+  labs(title = "", x = "", y = paste(gene_test, "expression")) +
+  theme(
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "white"),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black"),
+    axis.text.y = element_text(color = "black", size = font_size),
+    axis.text.x = element_text(color = "black", size = font_size, angle = 90, hjust = 1, vjust = 0.5),
+    panel.border = element_blank(),
+    legend.position = "none"
+  )
+
+ggsave(
+  filename = paste0(fig_dir, "Clint_", gene_test, "_expr_violin_plot.pdf"),
+  plot = p,
+  width = 2, height = 3.5,
+  units = "in",
+  bg = "transparent"
+)
+
+```
+
+
+
+# Load Data (GSE234933; Bill et al. HNSCC)
+```{r}
+# Load scRNA-seq and pseudo-bulk data
+seu_GSE234933_neu <- readRDS("/Users/changt7/Documents/00.PostDocWork/CancerResearch/07.scRNAseq_Datasets/GSE234933/seu_Tissue_Neutrophils.rds")
+seu_GSE234933 <- readRDS("/Users/changt7/Documents/00.PostDocWork/CancerResearch/07.scRNAseq_Datasets/GSE234933/seu_Tissue.rds")
+
+GSE234933_neu_TPM <- read.csv("/Users/changt7/Documents/00.PostDocWork/CancerResearch/07.scRNAseq_Datasets/GSE234933/GSE234933_pseudobulk_TPM_Neutrophils.csv", row.names = 1, check.names = FALSE)
+GSE234933_T_TPM <- read.csv("/Users/changt7/Documents/00.PostDocWork/CancerResearch/07.scRNAseq_Datasets/GSE234933/GSE234933_pseudobulk_TPM_T_cells.csv", row.names = 1, check.names = FALSE)
+
+keep_samples <- intersect(colnames(GSE234933_neu_TPM), colnames(GSE234933_T_TPM))
+GSE234933_neu_TPM_log1p <- log1p(GSE234933_neu_TPM[keep_samples])
+GSE234933_T_TPM_log1p <- log1p(GSE234933_T_TPM[keep_samples])
+
+GSE234933_cellRatios_raw <- read.csv("/Users/changt7/Documents/00.PostDocWork/CancerResearch/07.scRNAseq_Datasets/GSE234933/GSE234933_Tissue_CellProportions_withTumorCells.csv", row.names = 1, check.names = FALSE)
+GSE234933_cellRatios <- data.frame(t(GSE234933_cellRatios_raw))
+colnames(GSE234933_cellRatios) <- rownames(GSE234933_cellRatios_raw)
+GSE234933_cellRatios <- GSE234933_cellRatios[keep_samples]
+
+```
+
+# Fig 1m – Violin Plot of EGR1 Expression in GSE234933
+```{r}
+seu_GSE234933 <- subset(seu_GSE234933, subset = cellType_origin_L2 != "NA")
+test_gene <- "EGR1"
+
+geneExpr_data <- FetchData(seu_GSE234933, vars = c(test_gene, "cellType_origin_L2"))
+colnames(geneExpr_data) <- c("GeneExpr", "cellType_origin_L2")
+
+rename_map <- c("T_cells" = "T", "Dendritic_cells" = "DC", "B_cells" = "B",
+                "Endothelial_cells" = "Endothelial", "Mast_cells" = "Mast",
+                "NormalEpith" = "Normal epithelial")
+geneExpr_data$cellType_origin_L2 <- plyr::mapvalues(geneExpr_data$cellType_origin_L2,
+                                                     from = names(rename_map),
+                                                     to = rename_map)
+
+GeneExpr_medians <- geneExpr_data %>%
+  group_by(cellType_origin_L2) %>%
+  summarize(mean_GeneExpr = mean(GeneExpr, na.rm = TRUE))
+
+ordered_cell_types <- GeneExpr_medians$cellType_origin_L2[order(-GeneExpr_medians$mean_GeneExpr)]
+geneExpr_data$cellType_origin_L2 <- factor(geneExpr_data$cellType_origin_L2, levels = ordered_cell_types)
+
+font_size <- 14
+p <- ggplot(geneExpr_data, aes(x = cellType_origin_L2, y = GeneExpr, fill = cellType_origin_L2)) +
+  geom_violin(scale = "width", trim = TRUE, alpha = 0.8) +
+  geom_boxplot(width = 0.15, fill = "white", color = "black", outlier.shape = NA) +
+  scale_fill_manual(values = color_clusters) +
+  labs(x = "", y = bquote(italic(.(test_gene)) ~ "expression")) +
+  theme(panel.grid = element_blank(),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        axis.text = element_text(color = "black", size = font_size),
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        panel.border = element_blank(),
+        legend.position = "none")
+
+ggsave(paste0(fig_dir, "GSE234933_", test_gene, "_expr_violin_plot.pdf"),
+       plot = p, width = 3.5, height = 3.5, units = "in")
+
+wilcox.test(geneExpr_data$GeneExpr[geneExpr_data$cellType_origin_L2 == ordered_cell_types[1]],
+            geneExpr_data$GeneExpr[geneExpr_data$cellType_origin_L2 != ordered_cell_types[1]])
+
+mean(geneExpr_data$GeneExpr[geneExpr_data$cellType_origin_L2 == ordered_cell_types[1]]) /
+  mean(geneExpr_data$GeneExpr[geneExpr_data$cellType_origin_L2 != ordered_cell_types[1]])
+
+```
+
+# Fig 1n – Correlation Plot of EGR1 (Neutrophils) vs T Cell IFNG/HLA-DRA Expression or Abundance in GSE234933 
+```{r}
+pseudobulk_mat <- as.matrix(GSE234933_T_TPM_log1p)
+test_gene <- "IFNG"
+
+if (test_gene == "T_cells") {
+  all_info <- data.frame(EGR1 = as.numeric(GSE234933_neu_TPM_log1p["EGR1", ]),
+                         Score = as.numeric(GSE234933_cellRatios[test_gene, ]))
+  ylabel <- "T-cell abundance"
+} else {
+  all_info <- data.frame(EGR1 = as.numeric(GSE234933_neu_TPM_log1p["EGR1", ]),
+                         Score = as.numeric(GSE234933_T_TPM_log1p[test_gene, ]))
+  ylabel <- paste0("T-cell ", test_gene, " expression")
+}
+
+xlabel <- "Neutrophil EGR1 expression"
+pdf_file <- paste0(fig_dir, "GSE234933_EGR1_", test_gene, "_cor.pdf")
+fig_width <- 2.7 * 0.85 * 1.2
+fig_height <- 2.7 * 0.8 * 1.2
+
+pcc <- cor(all_info$EGR1, all_info$Score, method = "pearson")
+p_val <- cor.test(all_info$EGR1, all_info$Score, method = "pearson")$p.value
+scc <- cor(all_info$EGR1, all_info$Score, method = "spearman")
+p_val2 <- cor.test(all_info$EGR1, all_info$Score, method = "spearman")$p.value
+
+label <- sprintf("PCC = %.2f, p = %.1g\nSCC = %.2f, p = %.1g", pcc, p_val, scc, p_val2)
+
+new_data <- data.frame(EGR1 = seq(min(all_info$EGR1), max(all_info$EGR1), by = 0.1))
+fit <- lm(Score ~ EGR1, data = all_info)
+pred <- predict(fit, newdata = new_data, interval = "confidence", level = 0.95)
+new_data$Score <- pred[, "fit"]
+new_data$ymin <- pred[, "lwr"]
+new_data$ymax <- pred[, "upr"]
+
+xmin <- max(0, min(all_info$EGR1) - 0.1)
+xmax <- max(all_info$EGR1) + 0.1
+ymin <- -0.5
+ymax <- max(all_info$Score) + 0.1
+
+pdf(pdf_file, onefile = FALSE, width = fig_width, height = fig_height)
+ggplot(all_info, aes(x = EGR1, y = Score)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_ribbon(data = new_data, aes(ymin = ymin, ymax = ymax), fill = "lightblue", alpha = 0.5) +
+  annotate("text", x = min(all_info$EGR1), y = min(all_info$Score), hjust = 0, label = label, size = 4) +
+  labs(x = xlabel, y = ylabel) +
+  theme(panel.grid = element_blank(),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        axis.text = element_text(color = "black"),
+        panel.border = element_blank()) +
+  coord_cartesian(xlim = c(xmin, xmax), ylim = c(ymin, ymax))
+dev.off()
+
+```
+
+
+
+
+
+# Load NSCLC Atlas Data (Salcheret et al.; the largest subset UKIM.V.2)
+```{r}
+NSCLCatlas_neu_TPM <- read.csv("/Users/changt7/Documents/00.PostDocWork/CancerResearch/07.scRNAseq_Datasets/NSCLCatlas/NSCLCatlas_pseudobulk_TPM_Neutrophils_geneSymbols.txt", sep = ",", row.names = 1)
+NSCLCatlas_T_TPM <- read.csv("/Users/changt7/Documents/00.PostDocWork/CancerResearch/07.scRNAseq_Datasets/NSCLCatlas/NSCLCatlas_pseudobulk_TPM_T_geneSymbols.txt", sep = ",", row.names = 1)
+
+NSCLCatlas_cell_ratios <- read.csv("/Users/changt7/Documents/00.PostDocWork/CancerResearch/07.scRNAseq_Datasets/NSCLCatlas/NSCLCatlas_CellProportions_L2.csv", sep = ",", row.names = 1)
+rownames(NSCLCatlas_cell_ratios) <- gsub("[-_]", ".", rownames(NSCLCatlas_cell_ratios))
+
+common_samples <- intersect(colnames(NSCLCatlas_neu_TPM), colnames(NSCLCatlas_T_TPM))
+keep_samples <- common_samples[grepl("UKIM.V.2", common_samples)]
+
+geneExpr_neutro_common <- NSCLCatlas_neu_TPM[keep_samples]
+geneExpr_T_common <- NSCLCatlas_T_TPM[keep_samples]
+
+NSCLCatlas_neu_TPM_log1p <- log1p(geneExpr_neutro_common)
+NSCLCatlas_T_TPM_log1p <- log1p(geneExpr_T_common)
+
+```
+
+# Fig 1o – Correlation Plot of EGR1 vs T Cell IFNG/HLA-DRA Expression or Abundance in NSCLC Atlas Data
+```{r}
+test_gene <- "IFNG"
+
+cell_abundance <- rowSums(NSCLCatlas_cell_ratios[keep_samples, c("T.cell.CD4", "T.cell.CD8", "T.cell.regulatory")])
+
+if (test_gene == "T_cells") {
+  all_info <- data.frame(EGR1 = as.numeric(NSCLCatlas_neu_TPM_log1p["EGR1", ]),
+                         Score = as.numeric(cell_abundance))
+  ylabel <- "T-cell abundance"
+} else {
+  all_info <- data.frame(EGR1 = as.numeric(NSCLCatlas_neu_TPM_log1p["EGR1", ]),
+                         Score = as.numeric(NSCLCatlas_T_TPM_log1p[test_gene, ]))
+  ylabel <- paste0("T-cell ", test_gene, " expression")
+}
+
+xlabel <- "Neutrophil EGR1 expression"
+pdf_file <- paste0(fig_dir, "NSCLCatlas_EGR1_", test_gene, "_cor.pdf")
+fig_width <- 2.7 * 0.85 * 1.1
+fig_height <- 2.7 * 0.8 * 1.16
+
+pcc <- cor(all_info$EGR1, all_info$Score, method = "pearson")
+p_val <- cor.test(all_info$EGR1, all_info$Score, method = "pearson")$p.value
+scc <- cor(all_info$EGR1, all_info$Score, method = "spearman")
+p_val2 <- cor.test(all_info$EGR1, all_info$Score, method = "spearman")$p.value
+label <- sprintf("PCC = %.2f, p = %.1g\nSCC = %.2f, p = %.1g", pcc, p_val, scc, p_val2)
+
+fit <- lm(Score ~ EGR1, data = all_info)
+new_data <- data.frame(EGR1 = seq(min(all_info$EGR1), max(all_info$EGR1), by = 0.1))
+pred <- predict(fit, newdata = new_data, interval = "confidence", level = 0.95)
+new_data$Score <- pred[, "fit"]
+new_data$ymin <- pred[, "lwr"]
+new_data$ymax <- pred[, "upr"]
+
+xmin <- max(0, min(all_info$EGR1) - 0.1)
+xmax <- max(all_info$EGR1) + 0.1
+ymin <- 0
+ymax <- max(all_info$Score) + 0.1
+
+pdf(pdf_file, onefile = FALSE, width = fig_width, height = fig_height)
+ggplot(all_info, aes(x = EGR1, y = Score)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_ribbon(data = new_data, aes(ymin = ymin, ymax = ymax), fill = "lightblue", alpha = 0.5) +
+  annotate("text", x = min(all_info$EGR1), y = max(all_info$Score) * 0.1, hjust = 0, label = label, size = 4) +
+  labs(x = xlabel, y = ylabel) +
+  theme(panel.grid = element_blank(),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        axis.text = element_text(color = "black"),
+        panel.border = element_blank()) +
+  coord_cartesian(xlim = c(xmin, xmax), ylim = c(ymin, ymax))
+dev.off()
+
+```
+
+
+
+
+# Load GSE127465 (Zilionis et al.; NSCLC Blood) Data
+```{r}
+dataset <- "GSE127465"
+sampleType_name <- "All"
+
+geneExpr_Neutro <- read.csv(paste0(processed_dir, dataset, "_", sampleType_name, "_pseudobulk_TPM_Neutrophils.txt"),
+                            sep = ",", row.names = 1)
+geneExpr_T <- read.csv(paste0(processed_dir, dataset, "_", sampleType_name, "_pseudobulk_TPM_Tcells.txt"),
+                       sep = ",", row.names = 1)
+cellRatios_all <- read.csv(paste0(processed_dir, dataset, "_CellProportions_L2.csv"),
+                           sep = ",", row.names = 1)
+
+common_samples <- intersect(colnames(geneExpr_Neutro), colnames(geneExpr_T))[c(1:5, 9:11)]
+
+GSE127465_Neutro_log1p <- log1p(geneExpr_Neutro[common_samples])
+GSE127465_T_log1p <- log1p(geneExpr_T[common_samples])
+
+```
+
+# Fig 1p – Correlation Plot of EGR1 (Neutrophils) vs T Cell IFNG/HLA-DRA Expression or Abundance in GSE127465
+```{r}
+test_gene <- "T_cells"
+
+EGR1_expr <- as.numeric(GSE127465_Neutro_log1p["EGR1", ])
+T_expr <- as.numeric(GSE127465_T_log1p["IFNG", ])
+T_cell_abundance <- rowSums(cellRatios_all[common_samples, c("CD4Tn", "CD8Tex")])
+
+if (test_gene == "T_cells") {
+  all_info <- data.frame(EGR1 = EGR1_expr, Score = T_cell_abundance)
+  ylabel <- "T-cell abundance"
+} else {
+  all_info <- data.frame(EGR1 = EGR1_expr, Score = T_expr)
+  ylabel <- paste0("T-cell ", test_gene, " expression")
+}
+
+xlabel <- "Neutrophil EGR1 expression"
+pdf_file <- paste0(fig_dir, "GSE127465_EGR1_", test_gene, "_cor.pdf")
+fig_width <- 2.7 * 0.85 * 1.1
+fig_height <- 2.7 * 0.8 * 1.1
+
+pcc <- cor(all_info$EGR1, all_info$Score, method = "pearson")
+p_val <- cor.test(all_info$EGR1, all_info$Score, method = "pearson")$p.value
+scc <- cor(all_info$EGR1, all_info$Score, method = "spearman")
+p_val2 <- cor.test(all_info$EGR1, all_info$Score, method = "spearman")$p.value
+label <- sprintf("PCC = %.2f, p = %.1g\nSCC = %.2f, p = %.1g", pcc, p_val, scc, p_val2)
+
+fit <- lm(Score ~ EGR1, data = all_info)
+new_data <- data.frame(EGR1 = seq(min(all_info$EGR1), max(all_info$EGR1), by = 0.1))
+pred <- predict(fit, newdata = new_data, interval = "confidence", level = 0.95)
+new_data$Score <- pred[, "fit"]
+new_data$ymin <- pred[, "lwr"]
+new_data$ymax <- pred[, "upr"]
+
+xmin <- max(0, min(all_info$EGR1) - 0.1)
+xmax <- max(all_info$EGR1) + 0.1
+ymin <- 0
+ymax <- max(all_info$Score) + 0.1
+
+pdf(pdf_file, onefile = FALSE, width = fig_width, height = fig_height)
+ggplot(all_info, aes(x = EGR1, y = Score)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_ribbon(data = new_data, aes(ymin = ymin, ymax = ymax), fill = "lightblue", alpha = 0.5) +
+  annotate("text", x = min(all_info$EGR1), y = max(all_info$Score) * 0.1,
+           hjust = 0, label = label, size = 4) +
+  labs(x = xlabel, y = ylabel) +
+  theme(panel.grid = element_blank(),
+        panel.background = element_rect(fill = "white"),
+        axis.line = element_line(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        axis.text = element_text(color = "black"),
+        panel.border = element_blank()) +
+  coord_cartesian(xlim = c(xmin, xmax), ylim = c(ymin, ymax))
+dev.off()
+
+```
+
