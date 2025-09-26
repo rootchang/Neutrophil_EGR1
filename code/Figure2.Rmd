@@ -27,7 +27,6 @@ ggplot2::theme_set(new = theme_bw(base_size = 12))
 library(UCell)
 library(Seurat)
 library(dplyr)
-library(ggplot2)
 library(celldex)
 library(cowplot)
 library(patchwork)
@@ -43,7 +42,6 @@ library(GSVA)
 library(clusterProfiler)
 library(msigdbr)
 library(fgsea)
-#install.packages("dbscan")
 library(dbscan)
 library(viridis)
 
@@ -69,15 +67,12 @@ gene_set_list <- list(
 
 ```
 
-
-
-################################## Fig. 2 a-f (Wu et al. single-cell transcriptomic data pseudo-bulk correlation analysis) ##################################
+############### Fig. 2 A-F (Wu et al. single-cell transcriptomic data pseudo-bulk correlation analysis) ##############
 
 # Load Wu et al. Pseudo-bulk Single-cell Transcriptomic Data and Compute Correlations with EGR1
 ```{r}
-# Load log-transformed pseudo-bulk TPM expression
 geneExpr_neuAtlas <- read.csv(
-  "/Users/changt7/Documents/00.PostDocWork/CancerResearch/07.scRNAseq_Datasets/Neutrophil_atlas/Neutrophil_atlas_pseudobulk_TPM_Neutrophils.csv",
+  "Neutrophil_atlas_pseudobulk_TPM_Neutrophils.csv",
   sep = ",", row.names = 1
 )
 geneExpr_neuAtlas <- log1p(geneExpr_neuAtlas)
@@ -99,13 +94,10 @@ target_vector <- as.numeric(geneExpr_neuAtlas["EGR1", ])
 # Loop through genes to compute Spearman and Pearson correlations
 for (i in seq_along(test_genes)) {
   if (i %% 1000 == 0) message(i, " genes processed...")
-
   gene <- test_genes[i]
   gene_vector <- as.numeric(geneExpr_neuAtlas[gene, ])
-
   scc_test <- cor.test(gene_vector, target_vector, method = "spearman")
   pcc_test <- cor.test(gene_vector, target_vector, method = "pearson")
-
   result_df[i, ] <- list(
     gene,
     scc_test$estimate,
@@ -123,12 +115,11 @@ result_df$mean_cor <- rowMeans(result_df[, c("scc", "pcc")], na.rm = TRUE)
 result_df$mean_FDR <- apply(result_df[, c("scc_fdr", "pcc_fdr")], 1, max, na.rm = TRUE)
 
 # Save output
-output_path <- "/Users/changt7/Documents/00.PostDocWork/CancerResearch/07.scRNAseq_Datasets/Neutrophil_atlas/AllGenes_EGR1_pseudobulk_cor.csv"
+output_path <- "AllGenes_EGR1_pseudobulk_cor.csv"
 write.csv(result_df, file = output_path, row.names = FALSE)
 
 # Extract positively and negatively correlated genes
 geneCor_neuAtlas_df <- na.omit(result_df)
-
 geneCor_neuAtlas_positive <- geneCor_neuAtlas_df$gene[
   geneCor_neuAtlas_df$mean_FDR < 0.05 & geneCor_neuAtlas_df$mean_cor > 0.3
 ]
@@ -136,10 +127,9 @@ geneCor_neuAtlas_negative <- geneCor_neuAtlas_df$gene[
   geneCor_neuAtlas_df$mean_FDR < 0.05 & geneCor_neuAtlas_df$mean_cor < -0.3
 ]
 
-
 ```
 
-# Fig 2a – Volcano Plot of EGR1 Correlations
+# Fig 2A – Volcano Plot of EGR1 Correlations
 ```{r}
 de_df <- geneCor_neuAtlas_df[c("gene", "mean_cor", "mean_FDR")]
 colnames(de_df) <- c("gene_symbol", "mean_cor", "mean_FDR")
@@ -159,12 +149,11 @@ myvolcanoplot <- ggplot(de_df, aes(x = mean_cor, y = -log10(mean_FDR), col = dif
   labs(x = "Correlation", y = "FDR") +
   theme_minimal(base_size = 14) +
   theme(legend.position = "none")
-
 ggsave(filename = paste0(fig_dir, "Volcano_plot_NeutrophilAtlas_EGR1_corGenes.pdf"), plot = myvolcanoplot, width = 4.4, height = 3.85)
 
 ```
 
-# Fig 2b – Barplot of Suppressive Genes Correlation
+# Fig 2B – Barplot of Suppressive Genes Correlation
 ```{r}
 genes_test <- c("OLR1", "OSM", "ARG1", "CD274", "TGFB1", "IL10", "NOS2", "CYBB", "IDO1", "CXCL1", "CXCL5", "CXCL8", "S100A8", "S100A9", "IL4RA", "STAT3", "MMP9", "PTGS2", "IL6", "SLC27A2", "CEBPB", "IL1A", "IL1B", "TNF")
 
@@ -195,7 +184,6 @@ ggplot(filtered_data, aes(x = reorder(gene, -mean_cor), y = mean_cor, fill = FDR
   labs(x = "Suppressive genes", y = expression("Correlation with" ~ italic(EGR1))) +
   theme_minimal(base_size = 14) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1, face = "italic"), legend.position = "none")
-
 ggsave(filename = paste0(fig_dir, "EGR1_cor_suppressiveGenes_NeutrophilAtlas.pdf"), width = 6.5, height = 4)
 
 ```
@@ -205,7 +193,6 @@ ggsave(filename = paste0(fig_dir, "EGR1_cor_suppressiveGenes_NeutrophilAtlas.pdf
 # Convert up-/down-correlated gene symbols to ENTREZ IDs
 up_genes <- de_df_up$gene_symbol
 down_genes <- de_df_down$gene_symbol
-
 up_genes_ids <- mapIds(org.Hs.eg.db, keys = up_genes, column = "ENTREZID", keytype = "SYMBOL")
 down_genes_ids <- mapIds(org.Hs.eg.db, keys = down_genes, column = "ENTREZID", keytype = "SYMBOL")
 
@@ -252,7 +239,7 @@ down_MSigDB_pathways <- enricher(
 
 ```
 
-# Fig 2c – Pathway Enrichment Barplot
+# Fig 2C – Pathway Enrichment Barplot
 ```{r}
 res_df <- as.data.frame(up_MSigDB_pathways)
 res_df$Description <- setNames(pathways_mapping, names(pathways_mapping))[res_df$ID]
@@ -269,7 +256,7 @@ dev.off()
 
 ```
 
-# Fig 2d–f – Correlation of EGR1 with GSVA Signature Scores
+# Fig 2D-F – Correlation of EGR1 with GSVA Signature Scores
 ```{r}
 # Compute GSVA scores
 pseudobulk_mat <- as.matrix(geneExpr_neuAtlas)
@@ -298,9 +285,7 @@ for (i in seq_along(plot_sigScores)) {
     EGR1 = pseudobulk_mat["EGR1", ],
     Score = gsva_scores[sig, ]
   )
-  
   label <- correlation_label(all_info$EGR1, all_info$Score)
-
   # Fit linear model and confidence intervals
   fit <- lm(Score ~ EGR1, data = all_info)
   new_data <- data.frame(EGR1 = seq(min(all_info$EGR1), max(all_info$EGR1), by = 0.1))
@@ -325,14 +310,11 @@ for (i in seq_along(plot_sigScores)) {
 
 ```
 
-
-
-################################## Fig. 2 g-k (our own single-cell transcriptomic data DEG analysis) ##################################
+################################## Fig. 2 G-K (in-house single-cell transcriptomic data DEG analysis) ##################################
 
 # Load Seurat Object
 ```{r}
 seu_neu <- readRDS(file = paste0(input_dir, "seu_neu_merged.rds"))
-
 ```
 
 # DEGs: Tumor vs Blood Neutrophils (prepare gene sets of tumor and blood neutrophil signatures for Figure 6c)
@@ -356,7 +338,7 @@ write.csv(de_df_sig, file = paste0(input_dir, "DEGs_TumorNeu_vs_BloodNeu.csv"))
 
 ```
 
-# Fig 2g – Volcano Plot: EGR1+ vs EGR1- Neutrophils (prepare EGR1+ signature gene sets for Figure 6d)
+# Fig 2G – Volcano Plot: EGR1+ vs EGR1- Neutrophils (prepare EGR1+ signature gene sets for Figure 6D)
 ```{r}
 seu_neu$EGR1_status <- ifelse(FetchData(seu_neu, vars = "EGR1") > 0, "EGR1+", "EGR1-")
 seu_neu$EGR1_status <- factor(seu_neu$EGR1_status, levels = c("EGR1-", "EGR1+"))
@@ -397,9 +379,7 @@ volcano_plot <- ggplot(de_df, aes(x = avg_log2FC, y = -log10(p_val_adj), color =
   scale_y_log10() +
   theme_classic(base_size = font_size) +
   theme(legend.position = "none")
-
 ggsave(filename = paste0(fig_dir, "Clint_Volcano_EGR1p_vs_EGR1n.pdf"), plot = volcano_plot, width = 4.4, height = 3.85)
-
 
 ```
 
@@ -408,7 +388,6 @@ ggsave(filename = paste0(fig_dir, "Clint_Volcano_EGR1p_vs_EGR1n.pdf"), plot = vo
 # Convert up-/down-correlated gene symbols to ENTREZ IDs
 up_genes <- de_df_up$gene_symbol
 down_genes <- de_df_down$gene_symbol
-
 up_genes_ids <- mapIds(org.Hs.eg.db, keys = up_genes, column = "ENTREZID", keytype = "SYMBOL")
 down_genes_ids <- mapIds(org.Hs.eg.db, keys = down_genes, column = "ENTREZID", keytype = "SYMBOL")
 
@@ -455,7 +434,7 @@ down_MSigDB_pathways <- enricher(
 
 ```
 
-# Fig 2h – MSigDB Enrichment Barplot
+# Fig 2H – MSigDB Enrichment Barplot
 ```{r}
 res_df <- as.data.frame(up_MSigDB_pathways)
 res_df$Description <- pathways_mapping[res_df$ID]
@@ -475,10 +454,9 @@ barplot(up_MSigDB_pathways, showCategory = sig_pathways_NUM, p.adjust.digits = 1
   )
 dev.off()
 
-
 ```
 
-# Fig 2i–k – Violin Plots of UCell Scores (of hypoxia, UPR, and angiogenesis in EGR1+ vs EGR1- neutrophils)
+# Fig 2I-K – Violin Plots of UCell Scores (of hypoxia, UPR, and angiogenesis in EGR1+ vs EGR1- neutrophils)
 ```{r}
 seu_neu <- AddModuleScore_UCell(seu_neu, features = list(
   Hypoxia = hypoxia_genes,
@@ -520,13 +498,10 @@ for (score in c("Hypoxia", "Angiogenesis", "UPR")) {
 
 ```
 
+################################## Fig. 2 L-O (spatial analysis) ##################################
 
-
-################################## Fig. 2 l-o (spatial analysis) ##################################
-
-# Fig 2l – Spatial Expression Maps (GSE208253; Arora et al. Visium spatial transcriptomics of OCSCC)
+# Fig 2L – Spatial Expression Maps (GSE208253; Arora et al. Visium spatial transcriptomics of OCSCC)
 ```{r}
-rds_file_dir <- "/Users/changt7/Documents/00.PostDocWork/CancerResearch/09.Spatial_Datasets/GSE208253/processed_from_raw/"
 rds_files <- list.files(rds_file_dir, pattern = "\\.rds$", full.names = TRUE)
 genes_for_test <- c("EGR1", "CXCL8", "IFNG", "Hypoxia_MSigDB_UCell", "Neutrophil_UCell")
 
@@ -534,20 +509,16 @@ for (gene_test in genes_for_test) {
   for (fn in rds_files) {
     sample_test <- toupper(sub(".*_(s[0-9]+)\\.rds$", "\\1", fn))
     message("Processing ", sample_test, " ...")
-
     seurat_obj <- readRDS(fn)
-
     feature_values <- if (!grepl("UCell", gene_test)) {
       FetchData(seurat_obj, vars = gene_test)[, 1]
     } else {
       seurat_obj@meta.data[[gene_test]]
     }
-
     spatial_data <- seurat_obj@meta.data[, c("pxl_row_in_fullres", "pxl_col_in_fullres")]
     spatial_data$pxl_row_in_fullres <- -spatial_data$pxl_row_in_fullres
     colnames(spatial_data) <- c("array_row", "array_col")
     spatial_data$feature <- feature_values
-
     # Capping values for visualization
     limits <- quantile(spatial_data$feature, c(0, 1), na.rm = TRUE)
     spatial_data$feature <- pmax(pmin(spatial_data$feature, limits[2]), limits[1])
@@ -559,7 +530,6 @@ for (gene_test in genes_for_test) {
       coord_fixed() +
       theme_void() +
       theme(plot.title = element_text(hjust = 0.5), legend.position = "right")
-
     ggsave(
       filename = paste0(fig_dir, "GSE208253_spatial_", gene_test, "_", sample_test, ".png"),
       plot = p, width = 6, height = 4, dpi = 100
@@ -569,7 +539,7 @@ for (gene_test in genes_for_test) {
 
 ```
 
-# Fig 2m – Spatial Correlation between [EGR1, CXCL8, Neutrophil] with Hypoxia (GSE208253; Arora et al. Visium spatial transcriptomics of OCSCC)
+# Fig 2M – Spatial Correlation between [EGR1, CXCL8, Neutrophil] with Hypoxia (GSE208253; Arora et al. Visium spatial transcriptomics of OCSCC)
 ```{r}
 vars_for_test <- c("EGR1", "CXCL8", "IFNG", "Neutrophil_UCell")
 vars_for_test_show <- c("EGR1", "CXCL8", "Neutrophil")
@@ -577,25 +547,21 @@ vars_for_test_show <- c("EGR1", "CXCL8", "Neutrophil")
 for (i in seq_along(vars_for_test)) {
   gene_test <- vars_for_test[i]
   gene_test_show <- vars_for_test_show[i]
-
   cor_results <- lapply(rds_files, function(fn) {
     sample_test <- toupper(sub(".*_(s[0-9]+)\\.rds$", "\\1", fn))
     seurat_obj <- readRDS(fn)
-
     a <- if (!grepl("UCell", gene_test)) {
       FetchData(seurat_obj, vars = gene_test)[, 1]
     } else {
       seurat_obj@meta.data[[gene_test]]
     }
     b <- seurat_obj@meta.data[["Hypoxia_MSigDB_UCell"]]
-
     list(
       Sample = sample_test,
       spearman_p = cor.test(a, b, method = "spearman")$p.value,
       spearman_cor = cor(a, b, method = "spearman")
     )
   })
-
   cor_results_df <- do.call(rbind, lapply(cor_results, as.data.frame))
   cor_results_df$slide_ID <- factor(cor_results_df$Sample, levels = cor_results_df$Sample)
   cor_results_df$p_label <- sapply(cor_results_df$spearman_p, function(p) {
@@ -614,14 +580,13 @@ for (i in seq_along(vars_for_test)) {
     coord_cartesian(ylim = c(0, 1.03)) +
     theme_minimal(base_size = 12) +
     theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none")
-
   ggsave(paste0(fig_dir, "Hypoxia_", gene_test_show, "_cor_ST_GSE208253.pdf"),
          plot = p, width = 3, height = 2.8)
 }
 
 ```
 
-# Extended Data Fig X – EGR1 vs IFNG Spatial Correlation (GSE208253; Arora et al. Visium spatial transcriptomics of OCSCC)
+# SFig 6F – EGR1 vs IFNG Spatial Correlation (GSE208253; Arora et al. Visium spatial transcriptomics of OCSCC)
 ```{r}
 gene_test <- "EGR1"
 gene_test_show <- "EGR1"
@@ -658,14 +623,13 @@ p <- ggplot(cor_results_df, aes(x = slide_ID, y = spearman_cor)) +
   coord_cartesian(ylim = c(-0.2, 1)) +
   theme_minimal(base_size = 12) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none")
-
 ggsave(paste0(fig_dir, "IFNG_", gene_test_show, "_cor_ST_GSE208253.pdf"),
        plot = p, width = 3, height = 2.8)
 
 ```
 
 
-# Fig 2m – Spatial Correlation between [EGR1, CXCL8, Neutrophil] with Hypoxia (GSE181300; Cheng et al. Visium spatial transcriptomics of HNSCC)
+# Fig 2M – Spatial Correlation between [EGR1, CXCL8, Neutrophil] with Hypoxia (GSE181300; Cheng et al. Visium spatial transcriptomics of HNSCC)
 ```{r}
 rds_files <- list.files(processed_dir, pattern = "\\.rds$", full.names = TRUE)
 
@@ -675,16 +639,12 @@ vars_for_test_show <- c("EGR1", "CXCL8", "Neutrophil")
 for (i in seq_along(vars_for_test_show)) {
   gene_test <- vars_for_test[i]
   gene_test_show <- vars_for_test_show[i]
-  
   cor_results <- list()
-
   for (fn_i in seq_along(rds_files)) {
     fn <- rds_files[fn_i]
     sample_id <- paste0("S", fn_i)
     message("Processing ", sample_id, " ...")
-    
     seurat_obj <- readRDS(fn)
-    
     a <- if (!grepl("UCell", gene_test)) {
       if (gene_test %in% rownames(seurat_obj)) {
         FetchData(seurat_obj, vars = gene_test)[, 1]
@@ -694,9 +654,7 @@ for (i in seq_along(vars_for_test_show)) {
     } else {
       seurat_obj@meta.data[[gene_test]]
     }
-
     b <- seurat_obj@meta.data[["Hypoxia_MSigDB_UCell"]]
-
     spearman_res <- cor.test(a, b, method = "spearman")
     pearson_res <- cor.test(a, b, method = "pearson")
 
@@ -711,7 +669,6 @@ for (i in seq_along(vars_for_test_show)) {
 
   cor_results_df <- do.call(rbind, lapply(cor_results, as.data.frame))
   cor_results_df$slide_ID <- factor(rownames(cor_results_df), levels = rownames(cor_results_df))
-
   cor_results_df <- cor_results_df %>%
     mutate(
       p_label = sapply(spearman_p, function(p) {
@@ -737,7 +694,6 @@ for (i in seq_along(vars_for_test_show)) {
       panel.grid = element_blank(),
       legend.position = "none"
     )
-
   ggsave(
     filename = paste0(fig_dir, "Hypoxia_", gene_test_show, "_cor_ST_GSE181300.pdf"),
     plot = p, width = 3, height = 2.8
@@ -746,38 +702,32 @@ for (i in seq_along(vars_for_test_show)) {
 
 ```
 
-# Extended Data Fig X – EGR1 vs IFNG Spatial Correlation (GSE181300; Cheng et al. Visium spatial transcriptomics of HNSCC)
+# SFig 6G – EGR1 vs IFNG Spatial Correlation (GSE181300; Cheng et al. Visium spatial transcriptomics of HNSCC)
 ```{r}
 gene_test <- "EGR1"
 gene_test_show <- "EGR1"
 
 cor_results <- list()
-
 for (fn_i in seq_along(rds_files)) {
   fn <- rds_files[fn_i]
   sample_id <- paste0("S", fn_i)
   message("Processing ", sample_id, " ...")
-
   seurat_obj <- readRDS(fn)
-
   a <- if (gene_test %in% rownames(seurat_obj)) {
     FetchData(seurat_obj, vars = gene_test)[, 1]
   } else {
     rep(NA, ncol(seurat_obj))
   }
-
   b <- if ("IFNG" %in% rownames(seurat_obj)) {
     FetchData(seurat_obj, vars = "IFNG")[, 1]
   } else {
     rep(NA, ncol(seurat_obj))
   }
-
   spearman_res <- if (sum(is.finite(a)) >= 2 && sum(is.finite(b)) >= 2) {
     cor.test(a, b, method = "spearman")
   } else {
     list(estimate = NA, p.value = NA)
   }
-
   pearson_res <- if (sum(is.finite(a)) >= 2 && sum(is.finite(b)) >= 2) {
     cor.test(a, b, method = "pearson")
   } else {
@@ -795,7 +745,6 @@ for (fn_i in seq_along(rds_files)) {
 
 cor_results_df <- do.call(rbind, lapply(cor_results, as.data.frame))
 cor_results_df$slide_ID <- factor(rownames(cor_results_df), levels = rownames(cor_results_df))
-
 cor_results_df <- cor_results_df %>%
   mutate(
     p_label = sapply(spearman_p, function(p) {
@@ -821,7 +770,6 @@ p <- ggplot(cor_results_df, aes(x = slide_ID, y = spearman_cor)) +
     panel.grid = element_blank(),
     legend.position = "none"
   )
-
 ggsave(
   filename = paste0(fig_dir, "IFNG_", gene_test_show, "_cor_ST_GSE181300.pdf"),
   plot = p, width = 3, height = 2.8
@@ -857,7 +805,7 @@ calculate_Gene_neighbor_ratio_dbscan <- function(seurat_obj, distance_threshold 
 
 ```
 
-# Fig 2o (left); Extended Data Figure X – Spatial Map: Neutrophils vs SLC2A1+/- Cells (He et al., single-cell level spatial transcriptomics of NSCLC)
+# Fig 2O (left); SFig 5 (left) – Spatial Map: Neutrophils vs SLC2A1+/- Cells (He et al., single-cell level spatial transcriptomics of NSCLC)
 ```{r}
 slc2a1_expr <- FetchData(seurat_obj, vars = "SLC2A1", layer = "data")[, 1]
 is_slc2a1_pos <- slc2a1_expr > 0
@@ -891,12 +839,11 @@ label_y <- bar_y + 200
 p <- p +
   annotate("segment", x = bar_x_start, xend = bar_x_end, y = bar_y, yend = bar_y, size = 3, color = "black") +
   annotate("text", x = label_x, y = label_y, label = "1 mm", size = 8, color = "black", vjust = 0)
-
 ggsave(paste0(fig_dir, "CosMx_Spatial_", sid, "_neutrophils_vs_SLC2A1.png"), plot = p, width = 12, height = 10.5, dpi = 150)
 
 ```
 
-# Fig 2o (right); Extended Data Figure X – Violin Plots for Neighborhood Enrichment (He et al., single-cell level spatial transcriptomics of NSCLC)
+# Fig 2o (right); SFig 5 (right) – Violin Plots for Neighborhood Enrichment (He et al., single-cell level spatial transcriptomics of NSCLC)
 ```{r}
 plot_gene_neighbor_violin <- function(seurat_obj, gene, sid, label = gene) {
   gene_expr <- FetchData(seurat_obj, vars = gene, layer = "data")[, 1]
@@ -912,7 +859,6 @@ plot_gene_neighbor_violin <- function(seurat_obj, gene, sid, label = gene) {
   seurat_obj[[status_col]] <- seurat_obj$cell_type.original
   seurat_obj[[status_col]][is_pos] <- paste0(gene, "+")
   seurat_obj[[status_col]][!is_pos] <- paste0(gene, "-")
-
   seurat_obj[[ratio_col]] <- calculate_Gene_neighbor_ratio_dbscan(seurat_obj, 300, gene)
 
   plot_df <- seurat_obj@meta.data %>%
@@ -936,7 +882,6 @@ plot_gene_neighbor_violin <- function(seurat_obj, gene, sid, label = gene) {
       axis.line = element_line(color = "black"),
       legend.position = "none"
     )
-
   ggsave(paste0(fig_dir, "Violin_CosMx_Spatial_", sid, "_", gene, "p_Neighbor_Ratio.pdf"),
          plot = p, width = 2.5, height = 3.5)
 

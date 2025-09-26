@@ -1,5 +1,5 @@
 ---
-title: "Figure 1. Immunosuppressive neutrophils infiltrate human oral cavity cancers and upregulate EGR1"
+title: "Systematic screen identifies EGR1 as a key regulator of neutrophil-mediated immunosuppression in human oral cavity cancer"
 author: "Tiangen Chang tiangen.chang@nih.gov"
 output: 
   rmarkdown::html_vignette:
@@ -25,7 +25,6 @@ ggplot2::theme_set(new = theme_bw(base_size = 12))
 ```{r, include=FALSE}
 library(Seurat)
 library(dplyr)
-library(ggplot2)
 library(RColorBrewer)
 library(stringr)
 library(ggrepel) 
@@ -33,13 +32,11 @@ library(gridExtra)
 
 ```
 
-# Load Data (Clint)
+# Load Data
 ```{r}
 seu_neu <- readRDS(file = paste0(input_dir, "seu_neu_merged.rds"))
-
 CD15_TPM <- read.csv(paste0(processed_dir, "Clint_merged_pseudobulk_TPM_Neutrophils.txt"), row.names = 1)
 CD15_TPM <- log1p(CD15_TPM)
-
 expressed_genes <- read.csv(paste0(processed_dir, "Clint_expressedGenes_Neutrophils.txt"), header = TRUE)
 
 ```
@@ -79,16 +76,13 @@ test_genes <- rownames(CD15_TPM_score)
 
 for (tg_i in seq_along(test_genes)) {
   if (tg_i %% 1000 == 0) print(paste(tg_i, "processed..."))
-  
   tg <- test_genes[tg_i]
-  
   a <- cor.test(as.numeric(CD15_TPM_score[tg, selected_cols]),
                 as.numeric(CD15_TPM_score["Score", selected_cols]),
                 method = "spearman")
   b <- cor.test(as.numeric(CD15_TPM_score[tg, selected_cols]),
                 as.numeric(CD15_TPM_score["Score", selected_cols]),
                 method = "pearson")
-  
   result_df[tg_i, ] <- c(tg, a$estimate[[1]], a$p.value, b$estimate[[1]], b$p.value)
 }
 
@@ -98,7 +92,7 @@ write.csv(result_df2, file = paste0(processed_dir, "AllGenes_CD15_suppresion_cor
 
 ```
 
-# Fig 1h — Volcano Plot
+# Fig 1H — Volcano Plot
 ```{r}
 result_df2 <- read.csv(file = paste0(processed_dir, "AllGenes_CD15_suppresion_cor.csv"))
 result_df3 <- result_df2[result_df2$gene %in% expressed_genes$x, ]
@@ -167,7 +161,7 @@ dev.off()
 
 ```
 
-# Fig 1i — Scatter Plot (EGR1 vs Suppression Score)
+# Fig 1I — Scatter Plot (EGR1 vs Suppression Score)
 ```{r}
 all_info <- CD15_TPM_score[c("EGR1", "Score"), , drop = FALSE]
 all_info <- data.frame(t(all_info))
@@ -212,7 +206,7 @@ dev.off()
 
 ```
 
-# Fig 1j — UMAP and EGR1 Expression
+# Fig 1J — UMAP and EGR1 Expression
 ```{r}
 colors <- c("#E69F00", "#56B4E9", "#009E73")
 font_size <- 14
@@ -249,7 +243,7 @@ ggsave(filename = paste0(fig_dir, "Clint_seu_neu_umap_EGR1_expr.pdf"),
 
 ```
 
-# Fig 1k — Violin Plot (EGR1 in different neutrophils)
+# Fig 1K — Violin Plot (EGR1 in different neutrophils)
 ```{r}
 gene_test <- "EGR1"
 egr1_data <- FetchData(seu_neu, vars = c(gene_test, "compartment"))
@@ -294,25 +288,24 @@ ggsave(
 
 # Load Data (GSE234933; Bill et al. HNSCC)
 ```{r}
-# Load scRNA-seq and pseudo-bulk data
-seu_GSE234933_neu <- readRDS("/Users/changt7/Documents/00.PostDocWork/CancerResearch/07.scRNAseq_Datasets/GSE234933/seu_Tissue_Neutrophils.rds")
-seu_GSE234933 <- readRDS("/Users/changt7/Documents/00.PostDocWork/CancerResearch/07.scRNAseq_Datasets/GSE234933/seu_Tissue.rds")
+seu_GSE234933_neu <- readRDS("seu_Tissue_Neutrophils.rds")
+seu_GSE234933 <- readRDS("seu_Tissue.rds")
 
-GSE234933_neu_TPM <- read.csv("/Users/changt7/Documents/00.PostDocWork/CancerResearch/07.scRNAseq_Datasets/GSE234933/GSE234933_pseudobulk_TPM_Neutrophils.csv", row.names = 1, check.names = FALSE)
-GSE234933_T_TPM <- read.csv("/Users/changt7/Documents/00.PostDocWork/CancerResearch/07.scRNAseq_Datasets/GSE234933/GSE234933_pseudobulk_TPM_T_cells.csv", row.names = 1, check.names = FALSE)
+GSE234933_neu_TPM <- read.csv("GSE234933_pseudobulk_TPM_Neutrophils.csv", row.names = 1, check.names = FALSE)
+GSE234933_T_TPM <- read.csv("GSE234933_pseudobulk_TPM_T_cells.csv", row.names = 1, check.names = FALSE)
 
 keep_samples <- intersect(colnames(GSE234933_neu_TPM), colnames(GSE234933_T_TPM))
 GSE234933_neu_TPM_log1p <- log1p(GSE234933_neu_TPM[keep_samples])
 GSE234933_T_TPM_log1p <- log1p(GSE234933_T_TPM[keep_samples])
 
-GSE234933_cellRatios_raw <- read.csv("/Users/changt7/Documents/00.PostDocWork/CancerResearch/07.scRNAseq_Datasets/GSE234933/GSE234933_Tissue_CellProportions_withTumorCells.csv", row.names = 1, check.names = FALSE)
+GSE234933_cellRatios_raw <- read.csv("GSE234933_Tissue_CellProportions_withTumorCells.csv", row.names = 1, check.names = FALSE)
 GSE234933_cellRatios <- data.frame(t(GSE234933_cellRatios_raw))
 colnames(GSE234933_cellRatios) <- rownames(GSE234933_cellRatios_raw)
 GSE234933_cellRatios <- GSE234933_cellRatios[keep_samples]
 
 ```
 
-# Fig 1m – Violin Plot of EGR1 Expression in GSE234933
+# Fig 1M – Violin Plot of EGR1 Expression in GSE234933
 ```{r}
 seu_GSE234933 <- subset(seu_GSE234933, subset = cellType_origin_L2 != "NA")
 test_gene <- "EGR1"
@@ -360,7 +353,7 @@ mean(geneExpr_data$GeneExpr[geneExpr_data$cellType_origin_L2 == ordered_cell_typ
 
 ```
 
-# Fig 1n – Correlation Plot of EGR1 (Neutrophils) vs T Cell IFNG/HLA-DRA Expression or Abundance in GSE234933 
+# Fig 1N – Correlation Plot of EGR1 (Neutrophils) vs T Cell IFNG/HLA-DRA Expression or Abundance in GSE234933 
 ```{r}
 pseudobulk_mat <- as.matrix(GSE234933_T_TPM_log1p)
 test_gene <- "IFNG"
@@ -418,15 +411,12 @@ dev.off()
 ```
 
 
-
-
-
 # Load NSCLC Atlas Data (Salcheret et al.; the largest subset UKIM.V.2)
 ```{r}
-NSCLCatlas_neu_TPM <- read.csv("/Users/changt7/Documents/00.PostDocWork/CancerResearch/07.scRNAseq_Datasets/NSCLCatlas/NSCLCatlas_pseudobulk_TPM_Neutrophils_geneSymbols.txt", sep = ",", row.names = 1)
-NSCLCatlas_T_TPM <- read.csv("/Users/changt7/Documents/00.PostDocWork/CancerResearch/07.scRNAseq_Datasets/NSCLCatlas/NSCLCatlas_pseudobulk_TPM_T_geneSymbols.txt", sep = ",", row.names = 1)
+NSCLCatlas_neu_TPM <- read.csv("NSCLCatlas_pseudobulk_TPM_Neutrophils_geneSymbols.txt", sep = ",", row.names = 1)
+NSCLCatlas_T_TPM <- read.csv("NSCLCatlas_pseudobulk_TPM_T_geneSymbols.txt", sep = ",", row.names = 1)
 
-NSCLCatlas_cell_ratios <- read.csv("/Users/changt7/Documents/00.PostDocWork/CancerResearch/07.scRNAseq_Datasets/NSCLCatlas/NSCLCatlas_CellProportions_L2.csv", sep = ",", row.names = 1)
+NSCLCatlas_cell_ratios <- read.csv("NSCLCatlas_CellProportions_L2.csv", sep = ",", row.names = 1)
 rownames(NSCLCatlas_cell_ratios) <- gsub("[-_]", ".", rownames(NSCLCatlas_cell_ratios))
 
 common_samples <- intersect(colnames(NSCLCatlas_neu_TPM), colnames(NSCLCatlas_T_TPM))
@@ -440,7 +430,7 @@ NSCLCatlas_T_TPM_log1p <- log1p(geneExpr_T_common)
 
 ```
 
-# Fig 1o – Correlation Plot of EGR1 vs T Cell IFNG/HLA-DRA Expression or Abundance in NSCLC Atlas Data
+# Fig 1O – Correlation Plot of EGR1 vs T Cell IFNG/HLA-DRA Expression or Abundance in NSCLC Atlas Data
 ```{r}
 test_gene <- "IFNG"
 
@@ -497,9 +487,6 @@ dev.off()
 
 ```
 
-
-
-
 # Load GSE127465 (Zilionis et al.; NSCLC Blood) Data
 ```{r}
 dataset <- "GSE127465"
@@ -519,7 +506,7 @@ GSE127465_T_log1p <- log1p(geneExpr_T[common_samples])
 
 ```
 
-# Fig 1p – Correlation Plot of EGR1 (Neutrophils) vs T Cell IFNG/HLA-DRA Expression or Abundance in GSE127465
+# Fig 1P – Correlation Plot of EGR1 (Neutrophils) vs T Cell IFNG/HLA-DRA Expression or Abundance in GSE127465
 ```{r}
 test_gene <- "T_cells"
 
